@@ -85,6 +85,21 @@ export const toolDeclarations = [
   }, ["reason"]),
 ];
 
+const recordOwnerId = (record) => record?.user_id ?? record?.customer_id ?? record?.owner_id ?? record?.discord_user_id ?? null;
+
+// Fail closed: a missing owner field is not proof that the caller owns the resource.
+export function assertResourceOwnership(record, resourceType, userId) {
+  const ownerId = recordOwnerId(record);
+  if (ownerId == null || String(ownerId) !== String(userId)) {
+    throw new Error(`Unable to verify ownership of this ${resourceType}.`);
+  }
+  return record;
+}
+
+const STAFF_CONTROLLED_SERVICE_ACTIONS = new Set([
+  "cancel", "delete", "terminate", "refund", "suspend", "renew", "reactivate", "reverse", "chargeback",
+]);
+
 const cleanVps = (vps) => ({
   id: vps.id,
   name: vps.name,
@@ -123,15 +138,18 @@ export function createToolExecutor({ client, message, ticket, category }) {
     },
     async get_service(args) {
       const result = await business.service(args.service_id);
-      if (result?.service?.user_id && String(result.service.user_id) !== String(userId)) throw new Error("That service does not belong to this customer.");
+      assertResourceOwnership(result?.service, "service", userId);
       return result;
     },
     async request_service_action(args) {
-      const action = String(args.action || "").toLowerCase();
-      const destructive = new Set(["cancel", "delete", "terminate", "refund", "suspend"]);
-      if (destructive.has(action) && args.confirmed !== true) throw new Error("Explicit confirmation is required for this service action.");
-      const result = await business.serviceAction({ service_id: args.service_id, user_id: userId, action, confirmed: args.confirmed === true });
-      return result;
+      const action = String(args.action || "").trim().toLowerCase();
+      if (!/^[a-z_]{2,32}$/.test(action)) throw new Error("Invalid service action.");
+      const result = await business.service(args.service_id);
+      assertResourceOwnership(result?.service, "service", userId);
+      if (STAFF_CONTROLLED_SERVICE_ACTIONS.has(action)) {
+        throw new Error("This service action requires human staff approval. Escalate the ticket to staff.");
+      }
+      throw new Error("This service action is not enabled for autonomous support. Escalate the ticket to staff.");
     },
     async get_customer_profile(args) {
       assertSelf(args.user_id);
@@ -147,19 +165,24 @@ export function createToolExecutor({ client, message, ticket, category }) {
     },
     async get_invoice(args) {
       const result = await business.invoice(args.invoice_id);
-      if (result?.invoice?.user_id && String(result.invoice.user_id) !== String(userId)) {
-        throw new Error("That invoice does not belong to this customer.");
-      }
+      assertResourceOwnership(result?.invoice, "invoice", userId);
       return result;
     },
     async get_payment(args) {
       const result = await business.payment(args.payment_id);
-      if (result?.payment?.user_id && String(result.payment.user_id) !== String(userId)) {
-        throw new Error("That payment does not belong to this customer.");
-      }
+      assertResourceOwnership(result?.payment, "payment", userId);
       return result;
     },
     async create_payment_link(args) {
+      // Never create a payment link until the invoice is fetched and ownership is verified.
+      const invoiceResult = await business.invoice(args.invoice_id);
+      assertResourceOwnership(invoiceResult?.invoice, "invoice", userId);
+      if (String(invoiceResult.invoice.status || "").toLowerCase() !== "unpaid"
+        && String(invoiceResult.invoice.status || "").toLowerCase() !== "pending"
+        && String(invoiceResult.invoice.status || "").toLowerCase() !== "due"
+        && invoiceResult.invoice.payable !== true) {
+        throw new Error("The invoice is not confirmed payable. Contact support staff.");
+      }
       return business.createPaymentLink({
         invoice_id: args.invoice_id,
         user_id: userId,
@@ -238,9 +261,21 @@ export function createToolExecutor({ client, message, ticket, category }) {
       return vps.listForUser(userId);
     },
     async get_vps_status(args) { return { vps: cleanVps(await ownedVps(args.vps_id)) }; },
-    async start_vps(args) { return { vps: cleanVps((await vps.action(args.vps_id, "start")).vps) }; },
-    async stop_vps(args) { return { vps: cleanVps((await vps.action(args.vps_id, "stop")).vps) }; },
-    async restart_vps(args) { return { vps: cleanVps((await vps.action(args.vps_id, "restart")).vps) }; },
+    async start_vps(args) {
+      await ownedVps(args.vps_id);
+      if (!config.ai.autoActions) throw new Error("Automatic VPS actions are disabled.");
+      return { vps: cleanVps((await vps.action(args.vps_id, "start")).vps) };
+    },
+    async stop_vps(args) {
+      await ownedVps(args.vps_id);
+      if (!config.ai.autoActions) throw new Error("Automatic VPS actions are disabled.");
+      return { vps: cleanVps((await vps.action(args.vps_id, "stop")).vps) };
+    },
+    async restart_vps(args) {
+      await ownedVps(args.vps_id);
+      if (!config.ai.autoActions) throw new Error("Automatic VPS actions are disabled.");
+      return { vps: cleanVps((await vps.action(args.vps_id, "restart")).vps) };
+    },
     async get_vps_stats(args) { await ownedVps(args.vps_id); return vps.stats(args.vps_id); },
     async get_vps_logs(args) { await ownedVps(args.vps_id); return vps.logs(args.vps_id); },
     async delete_vps(args) {
