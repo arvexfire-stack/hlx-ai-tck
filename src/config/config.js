@@ -19,7 +19,7 @@ export const config = {
     maxToolRounds: Number(process.env.AI_MAX_TOOL_ROUNDS || 8),
     providerTimeoutMs: Number(process.env.AI_PROVIDER_TIMEOUT_MS || 30000),
     thinkingLevel: ["low", "medium", "high"].includes(process.env.AI_THINKING_LEVEL) ? process.env.AI_THINKING_LEVEL : "high",
-    autoActions: parseBool(process.env.AI_AUTO_ACTIONS, true),
+    autoActions: parseBool(process.env.AI_AUTO_ACTIONS, false),
   },
   vps: {
     apiUrl: (process.env.VPS_BOT_API_URL || "").replace(/\/$/, ""),
