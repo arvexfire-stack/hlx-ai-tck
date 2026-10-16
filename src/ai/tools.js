@@ -12,7 +12,7 @@ const declaration = (name, description, properties = {}, required = []) => ({
 export const toolDeclarations = [
   declaration("get_service_catalog", "List real HelzerX products and services currently available.", {}),
   declaration("get_service", "Read one customer service by service ID.", { service_id: { type: "STRING", description: "Service ID." } }, ["service_id"]),
-  declaration("request_service_action", "Request an approved service operation such as renewal, suspension, reactivation, or cancellation through the business API. The business API enforces permissions and billing rules.", { service_id: { type: "STRING", description: "Customer service ID." }, action: { type: "STRING", description: "Requested operation." }, confirmed: { type: "BOOLEAN", description: "Explicit confirmation in the current ticket for destructive or money-affecting actions." } }, ["service_id", "action"]),
+  declaration("request_service_action", "Check ownership of a customer service and route service-changing requests to human support. This AI tool never executes service changes.", { service_id: { type: "STRING", description: "Customer service ID." }, action: { type: "STRING", description: "Requested operation to explain to staff." }, confirmed: { type: "BOOLEAN", description: "Whether the customer explicitly confirmed the request in this ticket." } }, ["service_id", "action"]),
   declaration("get_customer_profile", "Read the customer's real HelzerX account profile and account status.", {
     user_id: { type: "STRING", description: "Customer Discord user ID." },
   }, ["user_id"]),
