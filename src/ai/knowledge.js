@@ -2,7 +2,7 @@ import { config } from "#config/config";
 
 export function buildKnowledgeContext() {
   return [
-    "HelzerX Studio is the support brand.",
+    "HelzerX Technologies is the support brand.",
     "The AI is a central support and operations agent, not a VPS-only assistant.",
     "Supported business areas include account support, orders, billing, payments, domains, Minecraft, AI agents, VPS, rewards/invites, technical troubleshooting, and general product support.",
     "Core service terminology includes billing, payments, domains, Minecraft hosting, AI agents, and VPS hosting.",
