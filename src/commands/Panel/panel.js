@@ -24,6 +24,8 @@ import {
   ChannelType,
   MediaGalleryBuilder,
   MediaGalleryItemBuilder,
+  SectionBuilder,
+  ThumbnailBuilder,
 } from "discord.js";
 import { logger } from "#utils/logger";
 import { emoji } from "#config/emoji"
@@ -930,6 +932,24 @@ class PanelCommand extends Command {
         const video = new URL(message.videoUrl);
         if (["http:","https:"].includes(video.protocol)) c.addTextDisplayComponents(new TextDisplayBuilder().setContent(`**Video**\n[Watch video](${video.toString()})`));
       } catch { logger.warn("Panel","Invalid panel video URL was skipped"); }
+    }
+    const blocks = Array.isArray(message.blocks) ? message.blocks : [];
+    for (const block of blocks.slice(0, 25)) {
+      try {
+        if (block.type === "text" && block.content) c.addTextDisplayComponents(new TextDisplayBuilder().setContent(String(block.content).slice(0, 4000)));
+        else if (block.type === "section" && block.content && block.url) {
+          const u = new URL(block.url);
+          if (["https:", "http:"].includes(u.protocol)) c.addSectionComponents(new SectionBuilder().addTextDisplayComponents(new TextDisplayBuilder().setContent(String(block.content).slice(0, 2000))).setThumbnailAccessory(new ThumbnailBuilder().setURL(u.toString())));
+        } else if (block.type === "separator") c.addSeparatorComponents(new SeparatorBuilder().setSpacing(block.spacing === "large" ? SeparatorSpacingSize.Large : SeparatorSpacingSize.Small).setDivider(block.divider !== false));
+        else if (block.type === "gallery" && Array.isArray(block.urls)) {
+          const items = block.urls.slice(0, 10).map(url => { try { const u = new URL(url); return ["https:", "http:"].includes(u.protocol) ? new MediaGalleryItemBuilder().setURL(u.toString()) : null; } catch { return null; } }).filter(Boolean);
+          if (items.length) c.addMediaGalleryComponents(new MediaGalleryBuilder().addItems(...items));
+        } else if (block.type === "links" && Array.isArray(block.buttons)) {
+          const row = new ActionRowBuilder();
+          for (const item of block.buttons.slice(0, 5)) { try { const u = new URL(item.url); if (["https:", "http:"].includes(u.protocol)) row.addComponents(new ButtonBuilder().setLabel(String(item.label).slice(0, 80)).setStyle(ButtonStyle.Link).setURL(u.toString())); } catch {} }
+          if (row.components.length) c.addActionRowComponents(row);
+        }
+      } catch (e) { logger.warn("Panel", "Invalid custom message component skipped", e); }
     }
     if (message.footer) c.addTextDisplayComponents(new TextDisplayBuilder().setContent(`-# ${message.footer}`));
     if (showSeparators) c.addSeparatorComponents(new SeparatorBuilder().setSpacing(SeparatorSpacingSize.Small).setDivider(true));
