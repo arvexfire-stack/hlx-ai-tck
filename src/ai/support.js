@@ -90,7 +90,7 @@ function normalizeMessageContent(message) {
       return [title, description].filter(Boolean).join(" — ");
     })
     .filter(Boolean);
-  return [text, ...attachments, ...embeds].filter(Boolean).join("\\n").slice(0, 6000);
+  return [text, ...attachments, ...embeds].filter(Boolean).join("\n").slice(0, 6000);
 }
 
 export function formatHistory(messages) {
@@ -119,7 +119,8 @@ export function buildSupportPrompt({
   history,
   latestMessage,
 }) {
-  const transcript = history.map((item) => item.parts[0].text).join("\n");
+  const safeHistory = Array.isArray(history) ? history.slice(-25) : [];
+  const transcript = safeHistory.map((item) => item.parts?.[0]?.text || "").filter(Boolean).join("\n").slice(-24000);
 
   return [
     "You are HelzerX Technologies's AI support and operations agent inside a real Discord support ticket.",
