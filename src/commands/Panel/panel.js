@@ -467,6 +467,39 @@ class PanelCommand extends Command {
           return;
         }
 
+        if (id === "pm_upload_help") {
+          await i.reply({ content: "Discord does not expose your phone gallery directly from a normal button. For now, add direct HTTPS media links in Media Gallery; file-upload dialogs depend on Discord client/API support.", ephemeral: true });
+          return;
+        }
+        if (id === "pm_block_add") {
+          const type = i.values[0];
+          const panel = await db.getPanel(st.panelId);
+          const data = panel?.panelMessage?.toObject?.() || panel?.panelMessage || {};
+          data.blocks = Array.isArray(data.blocks) ? data.blocks : [];
+          if (data.blocks.length >= 25) { await i.reply({ content: "Maximum 25 components reached.", ephemeral: true }); return; }
+          if (type === "separator") { await i.deferUpdate(); data.blocks.push({ type: "separator", divider: true, spacing: "small" }); await db.setPanelMessage(st.panelId, data); await this._update(ctx,msg,st,db); return; }
+          st.temp.blockType = type;
+          const title = { text: "Add Text Display", section: "Add Section with Thumbnail", gallery: "Add Media Gallery", links: "Add Link Buttons Row" }[type] || "Add Component";
+          const modal = new ModalBuilder().setCustomId("pmb_add_" + i.id).setTitle(title);
+          if (type === "text") modal.addComponents(new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId("content").setLabel("Text (Markdown supported)").setStyle(TextInputStyle.Paragraph).setMaxLength(4000).setRequired(true)));
+          else if (type === "section") modal.addComponents(new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId("content").setLabel("Section text").setStyle(TextInputStyle.Paragraph).setMaxLength(2000).setRequired(true)), new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId("url").setLabel("Thumbnail HTTPS URL").setStyle(TextInputStyle.Short).setMaxLength(500).setRequired(true)));
+          else if (type === "gallery") modal.addComponents(new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId("urls").setLabel("Media URLs, one per line (max 10)").setStyle(TextInputStyle.Paragraph).setMaxLength(4000).setRequired(true)));
+          else if (type === "links") modal.addComponents(new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId("labels").setLabel("Button labels, one per line (max 5)").setStyle(TextInputStyle.Paragraph).setMaxLength(500).setRequired(true)), new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId("urls").setLabel("Matching HTTPS URLs, one per line").setStyle(TextInputStyle.Paragraph).setMaxLength(2000).setRequired(true)));
+          await i.showModal(modal);
+          try {
+            const sub = await i.awaitModalSubmit({ filter: x => x.customId === "pmb_add_" + i.id, time: 120000 });
+            const kind = st.temp.blockType, block = { type: kind };
+            if (kind === "text" || kind === "section") block.content = sub.fields.getTextInputValue("content").trim();
+            if (kind === "section") block.url = sub.fields.getTextInputValue("url").trim();
+            if (kind === "gallery") { block.urls = sub.fields.getTextInputValue("urls").split(/\s*\n\s*/).map(x=>x.trim()).filter(Boolean).slice(0,10); if (!block.urls.every(x=>{try{return ["http:","https:"].includes(new URL(x).protocol)}catch{return false}})) { await sub.reply({content:"Use valid HTTP/HTTPS media URLs.",ephemeral:true}); return; } }
+            if (kind === "links") { const labels=sub.fields.getTextInputValue("labels").split(/\s*\n\s*/).map(x=>x.trim()).filter(Boolean).slice(0,5); const urls=sub.fields.getTextInputValue("urls").split(/\s*\n\s*/).map(x=>x.trim()).filter(Boolean).slice(0,5); if (!labels.length || labels.length!==urls.length || !urls.every(x=>{try{return ["http:","https:"].includes(new URL(x).protocol)}catch{return false}})) { await sub.reply({content:"Provide matching button labels and valid HTTP/HTTPS URLs (up to five).",ephemeral:true}); return; } block.buttons=labels.map((label,n)=>({label:label.slice(0,80),url:urls[n]})); }
+            await sub.deferUpdate(); const latest=await db.getPanel(st.panelId); const latestData=latest?.panelMessage?.toObject?.()||latest?.panelMessage||{}; latestData.blocks=Array.isArray(latestData.blocks)?latestData.blocks:[]; if(latestData.blocks.length<25) latestData.blocks.push(block); await db.setPanelMessage(st.panelId,latestData); await this._update(ctx,msg,st,db);
+          } catch(e) { if(e?.code!=="InteractionCollectorError") logger.warn("Panel","Container component add failed",e); }
+          return;
+        }
+        if (id === "pm_block_edit") { await i.deferUpdate(); st.temp.editBlockIndex=Number(i.values[0]); const p=await db.getPanel(st.panelId); const data=p?.panelMessage?.toObject?.()||p?.panelMessage||{}; const b=data.blocks?.[st.temp.editBlockIndex]; if(!b)return; const c=new ContainerBuilder().addTextDisplayComponents(new TextDisplayBuilder().setContent("## Edit Component\n\nType: "+b.type+"\nContent: "+String(b.content||b.url||"No text").slice(0,150))); c.addActionRowComponents(new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId("pm_block_delete").setLabel("Delete Component").setStyle(ButtonStyle.Danger),new ButtonBuilder().setCustomId("pm_block_up").setLabel("Move Up").setStyle(ButtonStyle.Secondary).setDisabled(st.temp.editBlockIndex===0),new ButtonBuilder().setCustomId("pm_block_down").setLabel("Move Down").setStyle(ButtonStyle.Secondary).setDisabled(st.temp.editBlockIndex>=data.blocks.length-1),new ButtonBuilder().setCustomId("pm_block_back").setLabel("Back").setStyle(ButtonStyle.Primary))); await msg.edit({components:[c],flags:MessageFlags.IsComponentsV2}); return; }
+        if (["pm_block_delete","pm_block_up","pm_block_down"].includes(id)) { await i.deferUpdate(); const p=await db.getPanel(st.panelId); const data=p?.panelMessage?.toObject?.()||p?.panelMessage||{}; data.blocks=Array.isArray(data.blocks)?data.blocks:[]; const n=st.temp.editBlockIndex; if(id==="pm_block_delete") data.blocks.splice(n,1); else { const target=id==="pm_block_up"?n-1:n+1; if(n>=0&&target>=0&&target<data.blocks.length)[data.blocks[n],data.blocks[target]]=[data.blocks[target],data.blocks[n]]; } await db.setPanelMessage(st.panelId,data); await this._update(ctx,msg,st,db); return; }
+        if (id === "pm_block_back") { await i.deferUpdate(); await this._update(ctx,msg,st,db); return; }
         const panelMessageFields = {
           pm_title: { key: "title", label: "Panel title", style: TextInputStyle.Short, maxLength: 100, required: true, fallback: "Ticket Panel" },
           pm_description: { key: "description", label: "Description (4000 max)", style: TextInputStyle.Paragraph, maxLength: 4000, required: true, fallback: "Select a ticket category below to create a ticket" },
