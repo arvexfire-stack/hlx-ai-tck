@@ -343,18 +343,34 @@ class PanelCommand extends Command {
     const blocks = Array.isArray(m.blocks) ? m.blocks : [];
     const c = new ContainerBuilder();
     if (Number.isInteger(m.accentColor)) c.setAccentColor(m.accentColor);
-    const stepNames = ["Message Content", "Design & Style", "Images & Video", "Extra Message Elements"];
+    const stepNames = ["Message Builder", "Design & Style", "Images & Video", "Extra Components"];
     c.addTextDisplayComponents(new TextDisplayBuilder().setContent(
-      `## Ticket Panel Message Editor\n\n**Step ${step} of 4 — ${stepNames[step - 1]}**\n\nBuild the message one step at a time. Your changes save automatically.\n\n${step === 1 ? `**Title:** ${m.title || "Ticket Panel"}\n\n**Description:** ${m.description || "Select a ticket category below to create a ticket"}\n\n**Footer:** ${m.footer || "Not set"}` : step === 2 ? `**Accent color:** ${Number.isInteger(m.accentColor) ? "#" + m.accentColor.toString(16).padStart(6, "0") : "Default"}\n**Separators:** ${m.showSeparators === false ? "Off" : "On"}\n\nSet the visual style for your ticket panel.` : step === 3 ? `**Image:** ${m.imageUrl ? "Added" : "Not added"}\n**Video:** ${m.videoUrl ? "Added" : "Not added"}\n\nAdd media to make the panel clearer. Discord's standard message editor does not open your phone gallery automatically; upload support depends on the client and bot interaction flow.` : `**Extra elements:** ${blocks.length}\n\nAdd extra text, thumbnail sections, separators, media galleries, or link buttons. These are optional; the ticket category menu is added automatically.`}`
+      `## Ticket Panel Message Builder\n\n**Step ${step} of 4 — ${stepNames[step - 1]}**\n\nAdd content one block at a time, like a Components V2 builder. Each block can be edited, removed, or moved up/down. Changes save automatically.\n\n${step === 1 ? `**Content blocks:** ${blocks.length}/25\n**Footer:** ${m.footer || "Not set"}\n\nUse Markdown in each text block for headings, bold text, links, and line breaks. The ticket category menu is added automatically.` : step === 2 ? `**Accent color:** ${Number.isInteger(m.accentColor) ? "#" + m.accentColor.toString(16).padStart(6, "0") : "Default"}\n**Separators:** ${m.showSeparators === false ? "Off" : "On"}\n\nSet the visual style for your ticket panel.` : step === 3 ? `**Image:** ${m.imageUrl ? "Added" : "Not added"}\n**Video:** ${m.videoUrl ? "Added" : "Not added"}\n\nAdd media using the device upload dialog.` : `**Components:** ${blocks.length}\n\nManage optional sections, separators, galleries, and link buttons.`}`
     ));
     c.addSeparatorComponents(new SeparatorBuilder().setSpacing(SeparatorSpacingSize.Small).setDivider(true));
     if (step === 1) {
+      if (blocks.length) {
+        c.addTextDisplayComponents(new TextDisplayBuilder().setContent(blocks.map((b, n) => `${n + 1}. **${b.type}** — ${(b.content || b.url || b.label || "Component").slice(0, 70)}`).join("\n")));
+        c.addActionRowComponents(new ActionRowBuilder().addComponents(
+          new StringSelectMenuBuilder().setCustomId("pm_block_edit").setPlaceholder("Select a block to edit, move, or remove").addOptions(
+            blocks.slice(0, 25).map((b, n) => ({ label: `${n + 1}. ${b.type}`.slice(0, 100), description: (b.content || b.url || b.label || "Element").slice(0, 100), value: String(n) }))
+          )
+        ));
+      } else {
+        c.addTextDisplayComponents(new TextDisplayBuilder().setContent("*Your message is empty. Add your first text block below.*"));
+      }
       c.addActionRowComponents(new ActionRowBuilder().addComponents(
-        new ButtonBuilder().setCustomId("pm_title").setLabel("Edit Title").setStyle(ButtonStyle.Primary),
-        new ButtonBuilder().setCustomId("pm_description").setLabel("Edit Description").setStyle(ButtonStyle.Primary)
+        new StringSelectMenuBuilder().setCustomId("pm_block_add").setPlaceholder("Add a block to your message...").addOptions(
+          { label: "Text Block", description: "Add a text block with Markdown formatting", value: "text" },
+          { label: "Text with Thumbnail", description: "Add a section with a thumbnail", value: "section" },
+          { label: "Separator", description: "Add a visual divider", value: "separator" },
+          { label: "Media Gallery", description: "Add media items", value: "gallery" },
+          { label: "Link Buttons", description: "Add up to five link buttons", value: "links" }
+        ).setDisabled(blocks.length >= 25)
       ));
       c.addActionRowComponents(new ActionRowBuilder().addComponents(
-        new ButtonBuilder().setCustomId("pm_footer").setLabel("Edit Footer").setStyle(ButtonStyle.Secondary)
+        new ButtonBuilder().setCustomId("pm_footer").setLabel(m.footer ? "Edit Footer" : "Add Footer").setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder().setCustomId("pm_clear_footer").setLabel("Remove Footer").setStyle(ButtonStyle.Danger).setDisabled(!m.footer)
       ));
     } else if (step === 2) {
       c.addActionRowComponents(new ActionRowBuilder().addComponents(
@@ -1012,10 +1028,14 @@ class PanelCommand extends Command {
     const title = message.title || "Ticket Panel";
     const description = message.description || `${emoji.ticket} Select a ticket category below to create a ticket`;
     const showSeparators = message.showSeparators !== false;
+    const blocks = Array.isArray(message.blocks) ? message.blocks : [];
     if (Number.isInteger(message.accentColor)) c.setAccentColor(message.accentColor);
-    c.addTextDisplayComponents(new TextDisplayBuilder().setContent(`## ${title}`));
-    if (showSeparators) c.addSeparatorComponents(new SeparatorBuilder().setSpacing(SeparatorSpacingSize.Small).setDivider(true));
-    c.addTextDisplayComponents(new TextDisplayBuilder().setContent(description));
+    // Keep the legacy title/description for older panels until the user adds builder blocks.
+    if (blocks.length === 0) {
+      c.addTextDisplayComponents(new TextDisplayBuilder().setContent(`## ${title}`));
+      if (showSeparators) c.addSeparatorComponents(new SeparatorBuilder().setSpacing(SeparatorSpacingSize.Small).setDivider(true));
+      c.addTextDisplayComponents(new TextDisplayBuilder().setContent(description));
+    }
     if (message.imageUrl) {
       try {
         const image = new URL(message.imageUrl);
@@ -1028,7 +1048,6 @@ class PanelCommand extends Command {
         if (["http:","https:"].includes(video.protocol)) c.addTextDisplayComponents(new TextDisplayBuilder().setContent(`**Video**\n[Watch video](${video.toString()})`));
       } catch { logger.warn("Panel","Invalid panel video URL was skipped"); }
     }
-    const blocks = Array.isArray(message.blocks) ? message.blocks : [];
     for (const block of blocks.slice(0, 25)) {
       try {
         if (block.type === "text" && block.content) c.addTextDisplayComponents(new TextDisplayBuilder().setContent(String(block.content).slice(0, 4000)));
