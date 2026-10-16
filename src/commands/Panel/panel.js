@@ -22,6 +22,8 @@ import {
   ChannelSelectMenuBuilder,
   RoleSelectMenuBuilder,
   ChannelType,
+  MediaGalleryBuilder,
+  MediaGalleryItemBuilder,
 } from "discord.js";
 import { logger } from "#utils/logger";
 import { emoji } from "#config/emoji"
@@ -71,6 +73,7 @@ class PanelCommand extends Command {
     if (st.view === "CATEGORY_CHANNEL") return this._categoryChannel(ctx, st,db)
     if (st.view === "LOGS") return await this._logs(ctx, st, db);
     if (st.view === "SEND") return this._send(ctx, st);
+    if (st.view === "MESSAGE_EDIT") return await this._messageEdit(ctx, st, db);
   }
 
   _create(ctx) {
@@ -328,6 +331,39 @@ class PanelCommand extends Command {
     return c;
   }
 
+  async _messageEdit(ctx, st, db) {
+    const p = await db.getPanel(st.panelId);
+    if (!p) return this._msg("Panel Not Found","Create a panel before editing its message.");
+    const m = p.panelMessage?.toObject?.() || p.panelMessage || {};
+    const c = new ContainerBuilder();
+    if (Number.isInteger(m.accentColor)) c.setAccentColor(m.accentColor);
+    c.addTextDisplayComponents(new TextDisplayBuilder().setContent(
+      `## Edit Ticket Panel Message\n\n**Title:** ${m.title || "Ticket Panel"}\n**Description:** ${(m.description || "Select a ticket category below to create a ticket").slice(0,180)}${(m.description || "").length>180?"…":""}\n**Image:** ${m.imageUrl?"Configured":"Not set"}\n**Video link:** ${m.videoUrl?"Configured":"Not set"}\n**Footer:** ${m.footer || "Not set"}\n**Accent color:** ${Number.isInteger(m.accentColor)?"#"+m.accentColor.toString(16).padStart(6,"0"):"Default"}\n**Separators:** ${m.showSeparators===false?"OFF":"ON"}\n\nChoose a setting below. Changes are saved automatically.`
+    ));
+    c.addSeparatorComponents(new SeparatorBuilder().setSpacing(SeparatorSpacingSize.Small).setDivider(true));
+    c.addActionRowComponents(new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId("pm_title").setLabel("Edit Title").setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId("pm_description").setLabel("Edit Description").setStyle(ButtonStyle.Secondary)
+    ));
+    c.addActionRowComponents(new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId("pm_image").setLabel("Set Image URL").setStyle(ButtonStyle.Primary),
+      new ButtonBuilder().setCustomId("pm_video").setLabel("Set Video Link").setStyle(ButtonStyle.Primary),
+      new ButtonBuilder().setCustomId("pm_footer").setLabel("Edit Footer").setStyle(ButtonStyle.Secondary)
+    ));
+    c.addActionRowComponents(new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId("pm_color").setLabel("Accent Color").setStyle(ButtonStyle.Primary),
+      new ButtonBuilder().setCustomId("pm_sep").setLabel(`Separators: ${m.showSeparators===false?"OFF":"ON"}`).setStyle(m.showSeparators===false?ButtonStyle.Secondary:ButtonStyle.Success)
+    ));
+    c.addActionRowComponents(new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId("pm_clear_image").setLabel("Clear Image").setStyle(ButtonStyle.Danger).setDisabled(!m.imageUrl),
+      new ButtonBuilder().setCustomId("pm_clear_video").setLabel("Clear Video").setStyle(ButtonStyle.Danger).setDisabled(!m.videoUrl),
+      new ButtonBuilder().setCustomId("pm_clear_footer").setLabel("Clear Footer").setStyle(ButtonStyle.Danger).setDisabled(!m.footer),
+      new ButtonBuilder().setCustomId("pm_clear_color").setLabel("Reset Color").setStyle(ButtonStyle.Danger).setDisabled(!Number.isInteger(m.accentColor))
+    ));
+    c.addActionRowComponents(new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId("panel_back").setLabel("Back to Main").setStyle(ButtonStyle.Secondary)));
+    return c;
+  }
+
   _send(ctx, st) {
     const c = new ContainerBuilder();
     c.addTextDisplayComponents(new TextDisplayBuilder().setContent(`## Send Panel\n\nSelect a channel to send the ticket panel message`));
@@ -415,39 +451,63 @@ class PanelCommand extends Command {
         }
 
         if (id === "panel_message") {
-          const p = await db.getPanel(st.panelId);
-          const modal = new ModalBuilder().setCustomId(`pm_${i.id}`).setTitle("Panel Message");
-          modal.addComponents(
-            new ActionRowBuilder().addComponents(
-              new TextInputBuilder()
-                .setCustomId("title")
-                .setLabel("Title")
-                .setStyle(TextInputStyle.Short)
-                .setMaxLength(100)
-                .setValue(p.panelMessage?.title || "Ticket Panel")
-                .setRequired(true)
-            ),
-            new ActionRowBuilder().addComponents(
-              new TextInputBuilder()
-                .setCustomId("description")
-                .setLabel("Description")
-                .setStyle(TextInputStyle.Paragraph)
-                .setMaxLength(4000)
-                .setValue(p.panelMessage?.description || "Select a category below to create a ticket")
-                .setRequired(true)
-            )
-          );
-          await i.showModal(modal);
-
-          try {
-            const sub = await i.awaitModalSubmit({ filter: s => s.customId === `pm_${i.id}`, time: 120_000 });
-            await sub.deferUpdate();
-            const title = sub.fields.getTextInputValue("title").trim();
-            const description = sub.fields.getTextInputValue("description").trim();
-            await db.setPanelMessage(st.panelId, { title, description });
-            await this._update(ctx, msg, st, db);
-          } catch (e) {}
+          await i.deferUpdate();
+          st.view = "MESSAGE_EDIT";
+          await this._update(ctx, msg, st, db);
           return;
+        }
+
+        const panelMessageFields = {
+          pm_title: { key: "title", label: "Panel title", style: TextInputStyle.Short, maxLength: 100, required: true, fallback: "Ticket Panel" },
+          pm_description: { key: "description", label: "Description (4000 max)", style: TextInputStyle.Paragraph, maxLength: 4000, required: true, fallback: "Select a ticket category below to create a ticket" },
+          pm_image: { key: "imageUrl", label: "Image URL (blank clears)", style: TextInputStyle.Short, maxLength: 500, required: false },
+          pm_video: { key: "videoUrl", label: "Video URL (blank clears)", style: TextInputStyle.Short, maxLength: 500, required: false },
+          pm_footer: { key: "footer", label: "Footer text (blank clears)", style: TextInputStyle.Short, maxLength: 200, required: false },
+          pm_color: { key: "accentColor", label: "Accent color hex e.g. #5865F2", style: TextInputStyle.Short, maxLength: 7, required: false },
+        };
+        if (panelMessageFields[id]) {
+          const field = panelMessageFields[id], current = await db.getPanel(st.panelId);
+          const saved = current?.panelMessage?.[field.key], modalId = `pmf_${id}_${i.id}`;
+          const label = field.key === "accentColor" ? "Accent Color" : field.key === "imageUrl" ? "Image" : field.key === "videoUrl" ? "Video Link" : field.key === "footer" ? "Footer" : field.key === "description" ? "Description" : "Title";
+          const modal = new ModalBuilder().setCustomId(modalId).setTitle(`Edit ${label}`);
+          const input = new TextInputBuilder().setCustomId("value").setLabel(field.label).setStyle(field.style).setMaxLength(field.maxLength).setRequired(field.required);
+          if (field.key === "accentColor") { if (Number.isInteger(saved)) input.setValue(`#${saved.toString(16).padStart(6,"0")}`); }
+          else if (typeof saved === "string" && saved.length) input.setValue(saved);
+          else if (field.fallback) input.setValue(field.fallback);
+          modal.addComponents(new ActionRowBuilder().addComponents(input));
+          await i.showModal(modal);
+          try {
+            const sub = await i.awaitModalSubmit({ filter: x => x.customId === modalId, time: 120_000 });
+            const raw = sub.fields.getTextInputValue("value").trim();
+            const latest = await db.getPanel(st.panelId);
+            const data = latest?.panelMessage?.toObject?.() || latest?.panelMessage || {};
+            let value = raw;
+            if (field.key === "imageUrl" || field.key === "videoUrl") {
+              if (raw) { let u; try { u = new URL(raw); } catch {} if (!u || !["http:","https:"].includes(u.protocol)) { await sub.reply({content:"Enter a valid http:// or https:// URL, or leave blank to clear.",ephemeral:true}); return; } }
+              value = raw || undefined;
+            } else if (field.key === "accentColor") {
+              if (!raw) value = undefined;
+              else if (/^#?[0-9a-fA-F]{6}$/.test(raw)) value = parseInt(raw.replace("#",""),16);
+              else { await sub.reply({content:"Use a six-digit hex color such as #5865F2, or leave blank to clear.",ephemeral:true}); return; }
+            } else if (field.key === "footer") value = raw || undefined;
+            await sub.deferUpdate();
+            if (value === undefined) delete data[field.key]; else data[field.key] = value;
+            await db.setPanelMessage(st.panelId,data);
+            await this._update(ctx,msg,st,db);
+          } catch (e) { if (e?.code !== "InteractionCollectorError") logger.warn("Panel","Panel message editor modal ended",e); }
+          return;
+        }
+        if (id === "pm_sep") {
+          await i.deferUpdate();
+          const panel = await db.getPanel(st.panelId), data = panel?.panelMessage?.toObject?.() || panel?.panelMessage || {};
+          data.showSeparators = data.showSeparators === false;
+          await db.setPanelMessage(st.panelId,data); await this._update(ctx,msg,st,db); return;
+        }
+        if (["pm_clear_image","pm_clear_video","pm_clear_footer","pm_clear_color"].includes(id)) {
+          await i.deferUpdate();
+          const panel = await db.getPanel(st.panelId), data = panel?.panelMessage?.toObject?.() || panel?.panelMessage || {};
+          const key = {pm_clear_image:"imageUrl",pm_clear_video:"videoUrl",pm_clear_footer:"footer",pm_clear_color:"accentColor"}[id];
+          delete data[key]; await db.setPanelMessage(st.panelId,data); await this._update(ctx,msg,st,db); return;
         }
 
         if (id === "panel_placeholder") {
@@ -808,13 +868,28 @@ class PanelCommand extends Command {
 
   _buildPanel(panel, cats) {
     const c = new ContainerBuilder();
-    const title = panel.panelMessage?.title || "Ticket Panel";
-    const description = panel.panelMessage?.description || ` ${emoji.ticket} Select a category below to create a ticket`;
-
+    const message = panel.panelMessage?.toObject?.() || panel.panelMessage || {};
+    const title = message.title || "Ticket Panel";
+    const description = message.description || `${emoji.ticket} Select a ticket category below to create a ticket`;
+    const showSeparators = message.showSeparators !== false;
+    if (Number.isInteger(message.accentColor)) c.setAccentColor(message.accentColor);
     c.addTextDisplayComponents(new TextDisplayBuilder().setContent(`## ${title}`));
-  c.addSeparatorComponents(new SeparatorBuilder().setSpacing(SeparatorSpacingSize.Small).setDivider(true))
-    c.addTextDisplayComponents( new TextDisplayBuilder().setContent(description))
-    c.addSeparatorComponents(new SeparatorBuilder().setSpacing(SeparatorSpacingSize.Small).setDivider(true));
+    if (showSeparators) c.addSeparatorComponents(new SeparatorBuilder().setSpacing(SeparatorSpacingSize.Small).setDivider(true));
+    c.addTextDisplayComponents(new TextDisplayBuilder().setContent(description));
+    if (message.imageUrl) {
+      try {
+        const image = new URL(message.imageUrl);
+        if (["http:","https:"].includes(image.protocol)) c.addMediaGalleryComponents(new MediaGalleryBuilder().addItems(new MediaGalleryItemBuilder().setURL(image.toString()).setDescription(`${title} image`.slice(0,100))));
+      } catch { logger.warn("Panel","Invalid panel image URL was skipped"); }
+    }
+    if (message.videoUrl) {
+      try {
+        const video = new URL(message.videoUrl);
+        if (["http:","https:"].includes(video.protocol)) c.addTextDisplayComponents(new TextDisplayBuilder().setContent(`**Video**\n[Watch video](${video.toString()})`));
+      } catch { logger.warn("Panel","Invalid panel video URL was skipped"); }
+    }
+    if (message.footer) c.addTextDisplayComponents(new TextDisplayBuilder().setContent(`-# ${message.footer}`));
+    if (showSeparators) c.addSeparatorComponents(new SeparatorBuilder().setSpacing(SeparatorSpacingSize.Small).setDivider(true));
 
     const opts = cats.map(cat => ({
       label: cat.name.substring(0, 100),
