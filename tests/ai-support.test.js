@@ -118,5 +118,6 @@ test("sanitizeToolOutput redacts secret fields and common token patterns", () =>
 test("sanitizeToolOutput bounds strings, arrays, and nesting", () => {
   assert.equal(sanitizeToolOutput("x".repeat(5000)).length, 4000);
   assert.equal(sanitizeToolOutput(Array.from({ length: 30 }, (_, i) => i)).length, 20);
-  assert.equal(sanitizeToolOutput({ a: { b: { c: { d: { e: { f: "too deep" } } } } } }).a.b.c.d.e, "[TRUNCATED]");
+  const deep = { a: { b: { c: { d: { e: { f: "too deep" } } } } } }; 
+  assert.equal(sanitizeToolOutput(deep).a.b.c.d.e, "[TRUNCATED]");
 });
