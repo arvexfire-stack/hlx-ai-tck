@@ -113,6 +113,12 @@ test("AI tool registry never exposes arbitrary shell, SSH, or Docker execution",
 });
 
 
+test("payment link tool does not accept a model-controlled return URL", () => {
+  const tool = toolDeclarations.find((item) => item.name === "create_payment_link");
+  assert.ok(tool);
+  assert.equal(Object.hasOwn(tool.parameters.properties, "return_url"), false);
+});
+
 test("autonomous AI actions are disabled by default unless explicitly opted in", () => {
   if (process.env.AI_AUTO_ACTIONS == null) {
     assert.equal(config.ai.autoActions, false);
