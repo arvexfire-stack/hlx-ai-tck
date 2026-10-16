@@ -111,3 +111,10 @@ test("AI tool registry never exposes arbitrary shell, SSH, or Docker execution",
   const names = toolDeclarations.map((tool) => tool.name);
   assert.equal(names.some((name) => /shell|ssh_exec|docker_exec|execute_command/i.test(name)), false);
 });
+
+
+test("autonomous AI actions are disabled by default unless explicitly opted in", () => {
+  if (process.env.AI_AUTO_ACTIONS == null) {
+    assert.equal(config.ai.autoActions, false);
+  }
+});
