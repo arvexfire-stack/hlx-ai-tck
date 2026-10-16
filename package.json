@@ -1,7 +1,7 @@
 {
-  "name": "helzerx-studio-ai-ticket",
+  "name": "helzerx-technologies-ai-support",
   "version": "4.0.0",
-  "description": "HelzerX Studio AI-powered Discord ticket support system",
+  "description": "HelzerX Technologies AI-powered Discord support and ticket operations agent",
   "type": "module",
   "main": "src/index.js",
   "scripts": {
@@ -30,7 +30,7 @@
     "bot",
     "discord.js"
   ],
-  "author": "HelzerX Studio",
+  "author": "HelzerX Technologies",
   "license": "MIT",
   "dependencies": {
     "discord-html-transcripts": "^3.2.0",
