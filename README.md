@@ -1,6 +1,6 @@
-# HelzerX Studio AI Ticket Manager
+# HelzerX Technologies AI Ticket Manager
 
-HelzerX Studio's Discord ticket system with a Gemini-powered operational support agent.
+HelzerX Technologies's Discord ticket system with a Gemini-powered operational support agent.
 
 ## What it does
 
@@ -64,7 +64,7 @@ MONGODB_URI=
 AI_ENABLED=true
 GEMINI_API_KEY=
 GEMINI_MODEL=gemini-3.8-flash
-AI_AUTO_ACTIONS=true
+AI_AUTO_ACTIONS=false
 AI_MAX_TOOL_ROUNDS=8
 AI_COOLDOWN_MS=1800
 AI_HISTORY_LIMIT=16
@@ -94,4 +94,4 @@ npm test
 npm run test:syntax
 ~~~
 
-Runtime integration with Discord, MongoDB, Gemini and the VPS agent should be tested on the deployment environment after configuring the required secrets.
+Runtime integration with Discord, MongoDB, Gemini, the HelzerX business API and the VPS agent must be tested in a staging environment before production use. Keep `AI_AUTO_ACTIONS=false` until ownership fields, business API permissions, and VPS action behavior have been verified. Never commit real tokens or `.env` files.
