@@ -25,8 +25,8 @@ export function sanitizeToolOutput(value, depth = 0) {
   if (value == null || typeof value === "number" || typeof value === "boolean") return value;
   if (typeof value === "string") {
     return value
-      .replace(/\\bBearer\\s+[A-Za-z0-9._~+\\/-]+=*/gi, "Bearer [REDACTED]")
-      .replace(/\\b(?:sk-[A-Za-z0-9_-]{12,}|gh[pousr]_[A-Za-z0-9_]{12,}|AIza[0-9A-Za-z_-]{20,})\\b/g, "[REDACTED_SECRET]")
+            .replace(/\bBearer\s+[A-Za-z0-9._~+\/-]+=*/gi, "Bearer [REDACTED]")
+            .replace(/\b(?:sk-[A-Za-z0-9_-]{12,}|gh[pousr]_[A-Za-z0-9_]{12,}|AIza[0-9A-Za-z_-]{20,})\b/g, "[REDACTED_SECRET]")
       .slice(0, 4000);
   }
   if (depth >= 5) return "[TRUNCATED]";
