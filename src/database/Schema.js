@@ -48,6 +48,11 @@ const panelSchema = new mongoose.Schema({
   panelMessage: {
     title: { type: String, default: "Ticket Panel" },
     description: { type: String, default: "Select a category below to create a ticket" },
+    imageUrl: { type: String, default: "" },
+    videoUrl: { type: String, default: "" },
+    footer: { type: String, default: "" },
+    accentColor: { type: Number, default: null },
+    showSeparators: { type: Boolean, default: true },
   },
   messageId: String,
   categories: [categorySchema],
