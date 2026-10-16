@@ -30,7 +30,6 @@ export const toolDeclarations = [
   }, ["payment_id"]),
   declaration("create_payment_link", "Create an official payment link for an existing payable invoice/order. Never invent payment URLs.", {
     invoice_id: { type: "STRING", description: "Invoice ID to pay." },
-    return_url: { type: "STRING", description: "Optional safe return URL configured by the business system." },
   }, ["invoice_id"]),
   declaration("get_customer_domains", "List domains associated with the customer.", {
     user_id: { type: "STRING", description: "Customer Discord user ID." },
@@ -186,7 +185,6 @@ export function createToolExecutor({ client, message, ticket, category }) {
       return business.createPaymentLink({
         invoice_id: args.invoice_id,
         user_id: userId,
-        return_url: args.return_url,
       });
     },
     async get_customer_domains(args) {
