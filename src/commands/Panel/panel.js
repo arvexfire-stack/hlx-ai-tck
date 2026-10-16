@@ -337,42 +337,65 @@ class PanelCommand extends Command {
     const p = await db.getPanel(st.panelId);
     if (!p) return this._msg("Panel Not Found", "Create a panel before editing its message.");
     const m = p.panelMessage?.toObject?.() || p.panelMessage || {};
+    const step = Math.min(4, Math.max(1, Number(st.temp?.editorStep) || 1));
     const blocks = Array.isArray(m.blocks) ? m.blocks : [];
     const c = new ContainerBuilder();
     if (Number.isInteger(m.accentColor)) c.setAccentColor(m.accentColor);
+    const stepNames = ["Message Content", "Design & Style", "Images & Video", "Extra Message Elements"];
     c.addTextDisplayComponents(new TextDisplayBuilder().setContent(
-      `## Container Builder\n\n**Title:** ${m.title || "Ticket Panel"}\n**Description:** ${(m.description || "Select a ticket category below to create a ticket").slice(0, 120)}\n**Accent Color:** ${Number.isInteger(m.accentColor) ? "#" + m.accentColor.toString(16).padStart(6, "0") : "none"}\n**Target Channel:** Select when sending\n**Blocks:** ${blocks.length}/25\n\nAdd components, then select one to edit or remove it.`
+      `## Ticket Panel Message Editor\n\n**Step ${step} of 4 — ${stepNames[step - 1]}**\n\nBuild the message one step at a time. Your changes save automatically.\n\n${step === 1 ? `**Title:** ${m.title || "Ticket Panel"}\n\n**Description:** ${m.description || "Select a ticket category below to create a ticket"}\n\n**Footer:** ${m.footer || "Not set"}` : step === 2 ? `**Accent color:** ${Number.isInteger(m.accentColor) ? "#" + m.accentColor.toString(16).padStart(6, "0") : "Default"}\n**Separators:** ${m.showSeparators === false ? "Off" : "On"}\n\nSet the visual style for your ticket panel.` : step === 3 ? `**Image:** ${m.imageUrl ? "Added" : "Not added"}\n**Video:** ${m.videoUrl ? "Added" : "Not added"}\n\nAdd media to make the panel clearer. Discord's standard message editor does not open your phone gallery automatically; upload support depends on the client and bot interaction flow.` : `**Extra elements:** ${blocks.length}\n\nAdd extra text, thumbnail sections, separators, media galleries, or link buttons. These are optional; the ticket category menu is added automatically.`}`
     ));
     c.addSeparatorComponents(new SeparatorBuilder().setSpacing(SeparatorSpacingSize.Small).setDivider(true));
-    if (blocks.length) {
-      c.addTextDisplayComponents(new TextDisplayBuilder().setContent(blocks.map((b, n) => `${n + 1}. **${b.type}** — ${(b.content || b.url || b.label || "Component").slice(0, 70)}`).join("\\n")));
+    if (step === 1) {
       c.addActionRowComponents(new ActionRowBuilder().addComponents(
-        new StringSelectMenuBuilder().setCustomId("pm_block_edit").setPlaceholder("Select a component to edit/delete").addOptions(
-          blocks.slice(0, 25).map((b, n) => ({ label: `${n + 1}. ${b.type}`.slice(0, 100), description: (b.content || b.url || b.label || "Component").slice(0, 100), value: String(n) }))
-        )
+        new ButtonBuilder().setCustomId("pm_title").setLabel("Edit Title").setStyle(ButtonStyle.Primary),
+        new ButtonBuilder().setCustomId("pm_description").setLabel("Edit Description").setStyle(ButtonStyle.Primary)
+      ));
+      c.addActionRowComponents(new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId("pm_footer").setLabel("Edit Footer").setStyle(ButtonStyle.Secondary)
+      ));
+    } else if (step === 2) {
+      c.addActionRowComponents(new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId("pm_color").setLabel("Accent Color").setStyle(ButtonStyle.Primary),
+        new ButtonBuilder().setCustomId("pm_sep").setLabel(`Separators: ${m.showSeparators === false ? "OFF" : "ON"}`).setStyle(m.showSeparators === false ? ButtonStyle.Secondary : ButtonStyle.Success)
+      ));
+      c.addActionRowComponents(new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId("pm_clear_color").setLabel("Reset Color").setStyle(ButtonStyle.Secondary)
+      ));
+    } else if (step === 3) {
+      c.addActionRowComponents(new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId("pm_image").setLabel("Add / Change Image").setStyle(ButtonStyle.Primary),
+        new ButtonBuilder().setCustomId("pm_video").setLabel("Add / Change Video").setStyle(ButtonStyle.Primary)
+      ));
+      c.addActionRowComponents(new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId("pm_clear_image").setLabel("Remove Image").setStyle(ButtonStyle.Danger).setDisabled(!m.imageUrl),
+        new ButtonBuilder().setCustomId("pm_clear_video").setLabel("Remove Video").setStyle(ButtonStyle.Danger).setDisabled(!m.videoUrl)
       ));
     } else {
-      c.addTextDisplayComponents(new TextDisplayBuilder().setContent("*Empty container. Use the controls below to add components.*"));
+      if (blocks.length) {
+        c.addTextDisplayComponents(new TextDisplayBuilder().setContent(blocks.map((b, n) => `${n + 1}. **${b.type}** — ${(b.content || b.url || b.label || "Component").slice(0, 70)}`).join("\n")));
+        c.addActionRowComponents(new ActionRowBuilder().addComponents(
+          new StringSelectMenuBuilder().setCustomId("pm_block_edit").setPlaceholder("Choose an element to manage").addOptions(
+            blocks.slice(0, 25).map((b, n) => ({ label: `${n + 1}. ${b.type}`.slice(0, 100), description: (b.content || b.url || b.label || "Element").slice(0, 100), value: String(n) }))
+          )
+        ));
+      } else c.addTextDisplayComponents(new TextDisplayBuilder().setContent("*No extra elements added. You can skip this step.*"));
+      c.addActionRowComponents(new ActionRowBuilder().addComponents(
+        new StringSelectMenuBuilder().setCustomId("pm_block_add").setPlaceholder("Add an optional message element...").addOptions(
+          { label: "Text", description: "Add a formatted text block", value: "text" },
+          { label: "Text with Thumbnail", description: "Add text alongside a thumbnail", value: "section" },
+          { label: "Separator", description: "Add a visual divider", value: "separator" },
+          { label: "Media Gallery", description: "Add media items to the message", value: "gallery" },
+          { label: "Link Buttons", description: "Add up to five link buttons", value: "links" }
+        )
+      ));
     }
-    c.addActionRowComponents(new ActionRowBuilder().addComponents(
-      new StringSelectMenuBuilder().setCustomId("pm_block_add").setPlaceholder("Add a new component...").addOptions(
-        { label: "Text Display", description: "Formatted text (Markdown supported)", value: "text" },
-        { label: "Section with Thumbnail", description: "Text content with a thumbnail image", value: "section" },
-        { label: "Separator", description: "Spacer line, optionally with divider", value: "separator" },
-        { label: "Media Gallery", description: "Upload images/videos or add media URLs", value: "gallery" },
-        { label: "Link Buttons Row", description: "Up to five link buttons", value: "links" }
-      )
-    ));
-    c.addActionRowComponents(new ActionRowBuilder().addComponents(
-      new ButtonBuilder().setCustomId("pm_title").setLabel("Edit Title").setStyle(ButtonStyle.Secondary),
-      new ButtonBuilder().setCustomId("pm_description").setLabel("Edit Description").setStyle(ButtonStyle.Secondary),
-      new ButtonBuilder().setCustomId("pm_color").setLabel("Set Accent Color").setStyle(ButtonStyle.Primary),
-      new ButtonBuilder().setCustomId("pm_sep").setLabel(`Separators: ${m.showSeparators === false ? "OFF" : "ON"}`).setStyle(m.showSeparators === false ? ButtonStyle.Secondary : ButtonStyle.Success)
-    ));
-    c.addActionRowComponents(new ActionRowBuilder().addComponents(
-      new ButtonBuilder().setCustomId("pm_upload_help").setLabel("Media Upload Help").setStyle(ButtonStyle.Primary),
-      new ButtonBuilder().setCustomId("panel_back").setLabel("Back to Main").setStyle(ButtonStyle.Secondary)
-    ));
+    const nav = new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId("pm_step_prev").setLabel("Previous").setStyle(ButtonStyle.Secondary).setDisabled(step === 1),
+      new ButtonBuilder().setCustomId("pm_step_next").setLabel(step === 4 ? "Finish Editing" : "Next Step").setStyle(ButtonStyle.Success),
+      new ButtonBuilder().setCustomId("panel_back").setLabel("Back to Panel Settings").setStyle(ButtonStyle.Secondary)
+    );
+    c.addActionRowComponents(nav);
     return c;
   }
 
@@ -465,6 +488,14 @@ class PanelCommand extends Command {
         if (id === "panel_message") {
           await i.deferUpdate();
           st.view = "MESSAGE_EDIT";
+          await this._update(ctx, msg, st, db);
+          return;
+        }
+
+        if (id === "pm_step_prev" || id === "pm_step_next") {
+          await i.deferUpdate();
+          const currentStep = Math.min(4, Math.max(1, Number(st.temp?.editorStep) || 1));
+          st.temp.editorStep = id === "pm_step_prev" ? Math.max(1, currentStep - 1) : (currentStep === 4 ? 1 : Math.min(4, currentStep + 1));
           await this._update(ctx, msg, st, db);
           return;
         }
