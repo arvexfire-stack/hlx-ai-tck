@@ -14,6 +14,10 @@ test("buildSupportPrompt creates a multilingual, service-aware support agent", (
 
   assert.match(prompt, /HelzerX Technologies/);
   assert.match(prompt, /Sinhala, Singlish/i);
+  assert.match(prompt, /whole ticket as one continuous conversation/i);
+  assert.match(prompt, /typos, abbreviations, slang, transliteration/i);
+  assert.match(prompt, /silently identify the customer's immediate intent/i);
+  assert.match(prompt, /Quality check before sending/i);
   assert.match(prompt, /orders, billing, payments, domains, Minecraft, AI agents, VPS/i);
   assert.match(prompt, /Never invent prices, plans, policies, refunds, payment status/i);
   assert.match(prompt, /Never ask for passwords, API keys, bot tokens/i);
@@ -74,6 +78,23 @@ test("buildSupportPrompt gives the AI a natural category-specific playbook", () 
   assert.match(prompt, /Do not invent performance guarantees/i);
   assert.match(prompt, /Do not ask for information the customer already provided/i);
   assert.ok(prompt.includes("<untrusted_latest_message>") && prompt.includes("around 8 players") && prompt.includes("</untrusted_latest_message>"));
+});
+
+test("formatHistory preserves attachment metadata and bounds conversation history", () => {
+  const messages = Array.from({ length: 30 }, (_, index) => ({
+    content: "message " + index,
+    author: { bot: false, username: "Customer" },
+    attachments: new Map(index === 29 ? [["a", { name: "error.png", contentType: "image/png" }]] : []),
+  }));
+  const history = formatHistory(messages);
+  assert.equal(history.length, 25);
+  assert.match(history[0].parts[0].text, /message 5/);
+  assert.match(history.at(-1).parts[0].text, /message 29/);
+  assert.match(history.at(-1).parts[0].text, /Attachment: error.png; type: image\/png/);
+});
+
+test("formatHistory ignores empty messages without useful attachments", () => {
+  assert.deepEqual(formatHistory([{ content: "  ", author: { bot: false } }]), []);
 });
 
 test("formatHistory preserves ticket context for the prompt without requiring Gemini model turns", () => {
