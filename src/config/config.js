@@ -17,12 +17,19 @@ export const config = {
     historyLimit: Number(process.env.AI_HISTORY_LIMIT || 16),
     staffSilenceMs: Number(process.env.AI_STAFF_SILENCE_MS || 5 * 60 * 1000),
     maxToolRounds: Number(process.env.AI_MAX_TOOL_ROUNDS || 8),
+    providerTimeoutMs: Number(process.env.AI_PROVIDER_TIMEOUT_MS || 30000),
+    thinkingLevel: ["low", "medium", "high"].includes(process.env.AI_THINKING_LEVEL) ? process.env.AI_THINKING_LEVEL : "high",
     autoActions: parseBool(process.env.AI_AUTO_ACTIONS, true),
   },
   vps: {
     apiUrl: (process.env.VPS_BOT_API_URL || "").replace(/\/$/, ""),
     apiToken: process.env.VPS_BOT_API_TOKEN || "",
     timeoutMs: Number(process.env.VPS_BOT_TIMEOUT_MS || 15000),
+  },
+  business: {
+    apiUrl: (process.env.HELZERX_API_URL || "").replace(/\/$/, ""),
+    apiToken: process.env.HELZERX_API_TOKEN || "",
+    timeoutMs: Number(process.env.HELZERX_API_TIMEOUT_MS || 15000),
   },
   invitePlans: [{
     id: "3-invite-vps",
@@ -48,5 +55,5 @@ export const config = {
     product: "HelzerX Studio AI Support",
     watermark: "HelzerX Studio",
   },
-  version: "4.0.0",
+  version: "5.0.0",
 };

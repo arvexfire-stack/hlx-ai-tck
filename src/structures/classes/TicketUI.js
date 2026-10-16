@@ -22,77 +22,70 @@ import { emoji } from "#config/emoji"
 export class TicketUI {
   static buildTicketPanel(ticket, category, addedUsers = []) {
     const container = new ContainerBuilder();
-    
-    const statusText = ticket.status === "open" ? "Open" : "Closed";
-    const welcomeMsg = category.settings?.welcomeMessage || "Welcome to **HelzerX Studio Support**. A support specialist will be with you shortly.";
-    
+    const isOpen = ticket.status === "open";
+    const focus = category.description || "Tell us what you need help with and our support team will assist you.";
+    const welcomeMsg = category.settings?.welcomeMessage || "Thanks for reaching out to HelzerX Studio. Tell me what is happening and I’ll help you work through it.";
+    const aiStatus = category.settings?.aiEnabled === false ? "Human Support" : ticket.aiStats?.humanTakeover ? "Human Staff Handling" : "AI Support Online";
+
     container.addTextDisplayComponents(
       new TextDisplayBuilder().setContent(
-        `## ${emoji.ticket} HelzerX Studio • ${category.name}\n\n${welcomeMsg}\n\n**Status:** ${statusText}`
+        `## ${emoji.ticket} HelzerX Studio • ${category.name}\n\n${welcomeMsg}\n\n**Category Focus**\n${focus}\n\n**Ticket**\n> **ID:** \`#${ticket.ticketId.replace("ticket_", "").slice(-8)}\`\n> **Status:** ${isOpen ? "🟢 Open" : "🔒 Closed"}\n> **Support:** ${aiStatus}\n> **Creator:** <@${ticket.userId}>`
       )
     );
-    
-    container.addSeparatorComponents(
-      new SeparatorBuilder().setSpacing(SeparatorSpacingSize.Small).setDivider(true)
+
+    container.addSeparatorComponents(new SeparatorBuilder().setSpacing(SeparatorSpacingSize.Small).setDivider(true));
+
+    container.addTextDisplayComponents(
+      new TextDisplayBuilder().setContent(
+        `### ${emoji.logs} Quick Resolution Guide\n\n• **Describe the issue:** Include the exact problem and what you expected.\n• **Technical issue:** Send screenshots, error messages, logs, or relevant configuration.\n• **Billing/service issue:** Include the service or order reference if available — never share passwords or payment secrets.\n• **Need a person?** Use **Claim** or ask the AI to escalate this ticket to staff.`
+      )
     );
 
-    if (ticket.status === "open") {
-      container.addActionRowComponents(
-        new ActionRowBuilder().addComponents(
-          new UserSelectMenuBuilder()
-            .setCustomId(`ticket_add_user_${ticket.ticketId}`)
-            .setPlaceholder(" Add user to ticket...")
-            .setMaxValues(1)
-        )
-      );
+    if (isOpen) {
+      container.addSeparatorComponents(new SeparatorBuilder().setSpacing(SeparatorSpacingSize.Small).setDivider(true));
+      container.addActionRowComponents(new ActionRowBuilder().addComponents(
+        new UserSelectMenuBuilder().setCustomId(`ticket_add_user_${ticket.ticketId}`).setPlaceholder("Add a user to this ticket...").setMaxValues(1)
+      ));
 
       if (addedUsers.length > 0) {
-        const removeOptions = addedUsers.map(u => ({
-          label: u.username || `User ${u.userId}`,
-          value: u.userId,
-          description: `Added by ${u.addedByUsername || 'Unknown'}`,
-        }));
-
-        container.addActionRowComponents(
-          new ActionRowBuilder().addComponents(
-            new StringSelectMenuBuilder()
-              .setCustomId(`ticket_remove_user_${ticket.ticketId}`)
-              .setPlaceholder("Remove user from ticket...")
-              .addOptions(removeOptions)
-              .setMaxValues(1)
-          )
-        );
+        const removeOptions = addedUsers.map(u => ({ label: u.username || `User ${u.userId}`, value: u.userId, description: `Added by ${u.addedByUsername || "Staff"}` }));
+        container.addActionRowComponents(new ActionRowBuilder().addComponents(
+          new StringSelectMenuBuilder().setCustomId(`ticket_remove_user_${ticket.ticketId}`).setPlaceholder("Remove a user from this ticket...").addOptions(removeOptions).setMaxValues(1)
+        ));
       }
 
-      container.addSeparatorComponents(
-        new SeparatorBuilder().setSpacing(SeparatorSpacingSize.Small)
-      );
-    }
-
-    const buttons = [];
-    
-    if (ticket.status === "open") {
-      buttons.push(
-        new ButtonBuilder()
-          .setCustomId(`ticket_close_${ticket.ticketId}`)
-          .setEmoji(emoji.lock)
-          .setStyle(ButtonStyle.Danger)
-      );
+      const buttons = [new ButtonBuilder().setCustomId(`ticket_close_${ticket.ticketId}`).setEmoji(emoji.lock).setLabel("Close").setStyle(ButtonStyle.Danger),
+        new ButtonBuilder().setCustomId(`ticket_transcript_${ticket.ticketId}`).setEmoji("📄").setLabel("Transcript").setStyle(ButtonStyle.Secondary)];
+      if (ticket.claimedBy) {
+        buttons.push(new ButtonBuilder().setCustomId(`ticket_unclaim_${ticket.ticketId}`).setEmoji("↩️").setLabel("Unclaim").setStyle(ButtonStyle.Secondary));
+      } else {
+        buttons.push(new ButtonBuilder().setCustomId(`ticket_claim_${ticket.ticketId}`).setEmoji("👋").setLabel("Claim").setStyle(ButtonStyle.Success));
+      }
+      container.addActionRowComponents(new ActionRowBuilder().addComponents(...buttons));
     } else {
-      buttons.push(
-        new ButtonBuilder()
-          .setCustomId(`ticket_reopen_${ticket.ticketId}`)
-          .setEmoji(emoji.unlock)
-          .setStyle(ButtonStyle.Success),
-        new ButtonBuilder()
-          .setCustomId(`ticket_delete_${ticket.ticketId}`)
-          .setEmoji(emoji.trash)
-          .setStyle(ButtonStyle.Danger)
-      );
+      container.addActionRowComponents(new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId(`ticket_transcript_${ticket.ticketId}`).setEmoji("📄").setLabel("Transcript").setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder().setCustomId(`ticket_reopen_${ticket.ticketId}`).setEmoji(emoji.unlock).setLabel("Reopen").setStyle(ButtonStyle.Success),
+        new ButtonBuilder().setCustomId(`ticket_delete_${ticket.ticketId}`).setEmoji(emoji.trash).setLabel("Delete").setStyle(ButtonStyle.Danger)
+      ));
     }
+    return container;
+  }
+  static buildStaffEscalation({ reason, priority = "normal", ticketId, customerId, staffRoles = [] }) {
+    const container = new ContainerBuilder();
+    const roleMentions = staffRoles.length ? staffRoles.map((roleId) => "<@&" + roleId + ">").join(" ") : "Support Staff";
+    const priorityLabel = String(priority).toUpperCase();
 
-    container.addActionRowComponents(
-      new ActionRowBuilder().addComponents(...buttons)
+    container.addTextDisplayComponents(
+      new TextDisplayBuilder().setContent(
+        "## Human Support Required\n\n" +
+        roleMentions + "\n\n" +
+        "**Priority:** " + priorityLabel + "\n" +
+        "**Customer:** <@" + customerId + ">\n" +
+        "**Ticket:** `" + ticketId + "`\n\n" +
+        "**Reason**\n" + reason + "\n\n" +
+        "HelzerX Studio AI has paused automated handling for this ticket. A staff member should review and continue the conversation."
+      )
     );
 
     return container;

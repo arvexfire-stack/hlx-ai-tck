@@ -6,7 +6,7 @@
 
 import mongoose from "mongoose";
 import { EventEmitter } from "events";
-import { Guild, Panel, Ticket } from "./Schema.js";
+import { Guild, Panel, Ticket, AIAudit } from "./Schema.js";
 import { logger } from "#utils/logger";
 import { config } from "../config/config.js";
 
@@ -17,6 +17,7 @@ export class DatabaseManager extends EventEmitter {
     this.Guild = Guild;
     this.Panel = Panel;
     this.Ticket = Ticket;
+    this.AIAudit = AIAudit;
   }
 
   async connect(uri) {
@@ -52,6 +53,14 @@ export class DatabaseManager extends EventEmitter {
       logger.error("Database", "Disconnection failed", error);
       this.client.emit("databaseError", error);
     }
+  }
+
+  async recordAIAudit(data) {
+    return await AIAudit.create(data);
+  }
+
+  async getAIAudits(ticketId, limit = 50) {
+    return await AIAudit.find({ ticketId }).sort({ createdAt: -1 }).limit(limit).lean();
   }
 
   async getGuild(guildId) {
@@ -388,8 +397,39 @@ async setPanelMessageId(panelId, channelId, messageId) {
   async setTicketChannel(ticketId, channelId) {
     return await this.updateTicket(ticketId, { channelId });
   }
-  async setTicketControlMessage(ticketId, controlMessageId){
-    return await this.updateTicket(ticketId, { controlMessageId: controlMessageId });
+  async setTicketControlMessage(ticketId, controlMessageId) {
+    return await this.updateTicket(ticketId, { controlMessageId });
+  }
+
+  async claimTicket(ticketId, staffId) {
+    const ticket = await Ticket.findOneAndUpdate(
+      { ticketId, status: "open", claimedBy: { $in: [null, ""] } },
+      {
+        $set: {
+          claimedBy: staffId,
+          claimedAt: new Date(),
+          "aiStats.humanTakeover": true,
+          "aiStats.escalated": true,
+          "aiStats.lastActionAt": new Date(),
+        },
+      },
+      { new: true }
+    );
+    return ticket;
+  }
+
+  async unclaimTicket(ticketId) {
+    return await Ticket.findOneAndUpdate(
+      { ticketId },
+      {
+        $set: {
+          claimedBy: null,
+          claimedAt: null,
+          "aiStats.humanTakeover": false,
+        },
+      },
+      { new: true }
+    );
   }
 
   async addTicketUser(ticketId, userId, addedBy) {
@@ -578,6 +618,15 @@ async setPanelMessageId(panelId, channelId, messageId) {
 
   async getTotalTicketCount() {
     return await Ticket.countDocuments();
+  }
+
+  async getAIStats(guildId) {
+    const [audits, escalated, aiMessages] = await Promise.all([
+      AIAudit.countDocuments({ guildId }),
+      Ticket.countDocuments({ guildId, "aiStats.escalated": true }),
+      Ticket.aggregate([{ $match: { guildId } }, { $group: { _id: null, messages: { $sum: "$aiStats.messages" }, toolCalls: { $sum: "$aiStats.toolCalls" } } }]),
+    ]);
+    return { audits, escalated, messages: aiMessages[0]?.messages || 0, toolCalls: aiMessages[0]?.toolCalls || 0 };
   }
 
   async getTotalOpenTicketCount() {

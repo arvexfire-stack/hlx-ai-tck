@@ -17,6 +17,7 @@ import {
 } from "discord.js";
 import { logger } from "#utils/logger";
 import TicketUI from "#structures/classes/TicketUI";
+import * as discordTranscripts from "discord-html-transcripts";
 import { emoji } from "#config/emoji"
 
 export default {
@@ -30,6 +31,9 @@ export default {
     const handlers = {
       ticket_create: handleTicketCreate,
       ticket_close: handleTicketClose,
+      ticket_claim: handleTicketClaim,
+      ticket_unclaim: handleTicketUnclaim,
+      ticket_transcript: handleTicketTranscript,
       ticket_add_user: handleTicketAddUser,
       ticket_remove_user: handleTicketRemoveUser,
       ticket_rate: handleTicketRate,
@@ -109,6 +113,154 @@ async function handleTicketCreate(interaction, client) {
   await interaction.editReply({
     components: [TicketUI.buildSuccess("Ticket Creating", "Your ticket is being created. You will be notified shortly.")],
     flags: TicketUI.getFlags()
+  });
+}
+
+async function handleTicketClaim(interaction, client) {
+  await interaction.deferUpdate();
+
+  const ticketId = interaction.customId.replace("ticket_claim_", "");
+  const ticket = await client.db.getTicket(ticketId);
+  if (!ticket) {
+    return interaction.followUp({
+      components: [TicketUI.buildError("Ticket Not Found", "This ticket could not be located.")],
+      flags: TicketUI.getEphemeralFlags(),
+    });
+  }
+
+  if (ticket.status !== "open") {
+    return interaction.followUp({
+      components: [TicketUI.buildWarning("Ticket Closed", "Closed tickets cannot be claimed.")],
+      flags: TicketUI.getEphemeralFlags(),
+    });
+  }
+
+  const canClaim = await checkPermissions(interaction, client, ticket, "claim");
+  if (!canClaim) {
+    return interaction.followUp({
+      components: [TicketUI.buildError("Staff Only", "Only an authorized support staff member can claim this ticket.")],
+      flags: TicketUI.getEphemeralFlags(),
+    });
+  }
+
+  const claimed = await client.db.claimTicket(ticketId, interaction.user.id);
+  if (!claimed) {
+    const current = await client.db.getTicket(ticketId);
+    return interaction.followUp({
+      components: [TicketUI.buildWarning("Already Claimed", current?.claimedBy ? `This ticket is already being handled by <@${current.claimedBy}>.` : "This ticket is already being handled by another staff member.")],
+      flags: TicketUI.getEphemeralFlags(),
+    });
+  }
+
+  const panel = await client.db.getPanel(claimed.panelId);
+  const category = panel?.categories?.find((item) => item.categoryId === claimed.categoryId);
+  const addedUsers = await client.db.getAddedUsers(ticketId);
+  const control = await interaction.channel.messages.fetch(claimed.controlMessageId).catch(() => null);
+  if (control && category) {
+    await control.edit({
+      components: [TicketUI.buildTicketPanel(claimed, category, addedUsers)],
+      flags: TicketUI.getFlags(),
+    }).catch(() => {});
+  }
+
+  await interaction.followUp({
+    content: `<@${claimed.userId}> — this ticket is now being handled by <@${interaction.user.id}>. AI automation is paused while staff is handling the conversation.`,
+    allowedMentions: { users: [claimed.userId, interaction.user.id] },
+  });
+}
+
+async function handleTicketTranscript(interaction, client) {
+  const ticketId = interaction.customId.replace("ticket_transcript_", "");
+  const ticket = await client.db.getTicket(ticketId);
+
+  if (!ticket) {
+    return interaction.reply({
+      components: [TicketUI.buildError("Ticket Not Found", "This ticket could not be located.")],
+      flags: TicketUI.getEphemeralFlags(),
+    });
+  }
+
+  const canView = await checkPermissions(interaction, client, ticket, "transcript");
+  if (!canView) {
+    return interaction.reply({
+      components: [TicketUI.buildError("Staff Only", "Only authorized support staff can generate a transcript.")],
+      flags: TicketUI.getEphemeralFlags(),
+    });
+  }
+
+  await interaction.deferReply({ flags: TicketUI.getEphemeralFlags() });
+
+  try {
+    const attachment = await discordTranscripts.createTranscript(interaction.channel, {
+      limit: -1,
+      filename: `helzerx-${ticket.ticketId}.html`,
+      saveImages: false,
+      poweredBy: false,
+      footerText: "HelzerX Studio • Ticket Transcript",
+    });
+
+    await interaction.editReply({
+      components: [TicketUI.buildSuccess(
+        "Transcript Ready",
+        "The complete ticket transcript has been generated below. It includes the conversation and ticket history."
+      )],
+      files: [attachment],
+      flags: TicketUI.getEphemeralFlags(),
+    });
+  } catch (error) {
+    logger.error("Transcript", `Failed for ${ticket.ticketId}`, error);
+    await interaction.editReply({
+      components: [TicketUI.buildError(
+        "Transcript Failed",
+        "I couldn't generate the transcript right now. Please try again or ask another staff member."
+      )],
+      flags: TicketUI.getFlags(),
+    });
+  }
+}
+
+async function handleTicketUnclaim(interaction, client) {
+  await interaction.deferUpdate();
+
+  const ticketId = interaction.customId.replace("ticket_unclaim_", "");
+  const ticket = await client.db.getTicket(ticketId);
+  if (!ticket) {
+    return interaction.followUp({
+      components: [TicketUI.buildError("Ticket Not Found", "This ticket could not be located.")],
+      flags: TicketUI.getEphemeralFlags(),
+    });
+  }
+
+  const canClaim = await checkPermissions(interaction, client, ticket, "claim");
+  if (!canClaim) {
+    return interaction.followUp({
+      components: [TicketUI.buildError("Staff Only", "Only authorized support staff can release this ticket.")],
+      flags: TicketUI.getEphemeralFlags(),
+    });
+  }
+
+  if (ticket.claimedBy && ticket.claimedBy !== interaction.user.id && !interaction.member.permissions.has(PermissionFlagsBits.ManageChannels)) {
+    return interaction.followUp({
+      components: [TicketUI.buildError("Claimed By Another Staff Member", `This ticket is currently handled by <@${ticket.claimedBy}>.`)],
+      flags: TicketUI.getEphemeralFlags(),
+    });
+  }
+
+  const updated = await client.db.unclaimTicket(ticketId);
+  const panel = await client.db.getPanel(updated.panelId);
+  const category = panel?.categories?.find((item) => item.categoryId === updated.categoryId);
+  const addedUsers = await client.db.getAddedUsers(ticketId);
+  const control = await interaction.channel.messages.fetch(updated.controlMessageId).catch(() => null);
+  if (control && category) {
+    await control.edit({
+      components: [TicketUI.buildTicketPanel(updated, category, addedUsers)],
+      flags: TicketUI.getFlags(),
+    }).catch(() => {});
+  }
+
+  await interaction.followUp({
+    content: `<@${updated.userId}> — staff handling has been released. AI support is available again for this ticket.`,
+    allowedMentions: { users: [updated.userId] },
   });
 }
 

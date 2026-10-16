@@ -14,6 +14,7 @@ const guildSchema = new mongoose.Schema({
     enabled: { type: Boolean, default: true },
     model: { type: String, default: "gemini-3.8-flash" },
     autoActions: { type: Boolean, default: true },
+    knowledgeVersion: { type: String, default: "1" },
   },
 }, { timestamps: true });
 
@@ -70,16 +71,19 @@ const ticketSchema = new mongoose.Schema({
   ticketId: { type: String, required: true, unique: true, index: true },
   guildId: { type: String, required: true, index: true },
   panelId: { type: String, required: true, index: true },
-  categoryId: { type: String, required: true },
+  categoryId: { type: String, required: true, index: true },
   channelId: String,
   userId: { type: String, required: true, index: true },
   status: { type: String, enum: ["open", "closed"], default: "open", index: true },
   addedUsers: [{ userId: String, addedBy: String, addedAt: { type: Date, default: Date.now } }],
   removedUsers: [{ userId: String, removedBy: String, removedAt: { type: Date, default: Date.now } }],
   controlMessageId: String,
+  claimedBy: String,
+  claimedAt: Date,
   closedBy: String,
   closedAt: Date,
   closeReason: String,
+  closeSummary: String,
   aiStats: {
     messages: { type: Number, default: 0 },
     toolCalls: { type: Number, default: 0 },
@@ -90,12 +94,26 @@ const ticketSchema = new mongoose.Schema({
     intent: String,
     priority: { type: String, enum: ["low", "normal", "high", "urgent"], default: "normal" },
     summary: String,
+    lastError: String,
+    lastProviderLatencyMs: Number,
   },
   rating: {
     stars: { type: Number, min: 1, max: 5 },
     feedback: String,
     ratedAt: Date,
   },
+}, { timestamps: true });
+
+const aiAuditSchema = new mongoose.Schema({
+  guildId: { type: String, required: true, index: true },
+  ticketId: { type: String, required: true, index: true },
+  userId: { type: String, required: true, index: true },
+  type: { type: String, required: true, index: true },
+  intent: String,
+  tool: String,
+  success: { type: Boolean, default: true },
+  summary: String,
+  metadata: mongoose.Schema.Types.Mixed,
 }, { timestamps: true });
 
 const inviteSnapshotSchema = new mongoose.Schema({
@@ -120,9 +138,12 @@ panelSchema.index({ guildId: 1, isActive: 1 });
 ticketSchema.index({ guildId: 1, status: 1 });
 ticketSchema.index({ userId: 1, status: 1 });
 ticketSchema.index({ panelId: 1, categoryId: 1 });
+aiAuditSchema.index({ guildId: 1, createdAt: -1 });
+aiAuditSchema.index({ ticketId: 1, createdAt: -1 });
 
 export const Guild = mongoose.model("Guild", guildSchema);
 export const Panel = mongoose.model("Panel", panelSchema);
 export const Ticket = mongoose.model("Ticket", ticketSchema);
+export const AIAudit = mongoose.model("AIAudit", aiAuditSchema);
 export const InviteSnapshot = mongoose.model("InviteSnapshot", inviteSnapshotSchema);
 export const InviteStat = mongoose.model("InviteStat", inviteStatSchema);
