@@ -53,6 +53,7 @@ const panelSchema = new mongoose.Schema({
     footer: { type: String, default: "" },
     accentColor: { type: Number, default: null },
     showSeparators: { type: Boolean, default: true },
+    blocks: { type: [mongoose.Schema.Types.Mixed], default: [] },
   },
   messageId: String,
   categories: [categorySchema],
