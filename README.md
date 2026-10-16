@@ -1,6 +1,6 @@
 # HelzerX Technologies AI Ticket Manager
 
-HelzerX Technologies's Discord ticket system with a Gemini-powered operational support agent.
+The HelzerX Technologies Discord ticket system with a Gemini-powered support and operations agent.
 
 ## What it does
 
