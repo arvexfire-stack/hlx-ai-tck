@@ -19,6 +19,27 @@ const withTimeout = async (promise, timeoutMs) => {
   }
 };
 
+const SENSITIVE_FIELD = /password|passphrase|secret|token|api[_-]?key|private[_-]?key|authorization|cookie|session|cvv|card[_-]?number|client[_-]?secret/i;
+
+export function sanitizeToolOutput(value, depth = 0) {
+  if (value == null || typeof value === "number" || typeof value === "boolean") return value;
+  if (typeof value === "string") {
+    return value
+      .replace(/\\bBearer\\s+[A-Za-z0-9._~+\\/-]+=*/gi, "Bearer [REDACTED]")
+      .replace(/\\b(?:sk-[A-Za-z0-9_-]{12,}|gh[pousr]_[A-Za-z0-9_]{12,}|AIza[0-9A-Za-z_-]{20,})\\b/g, "[REDACTED_SECRET]")
+      .slice(0, 4000);
+  }
+  if (depth >= 5) return "[TRUNCATED]";
+  if (Array.isArray(value)) return value.slice(0, 20).map((item) => sanitizeToolOutput(item, depth + 1));
+  if (typeof value === "object") {
+    return Object.fromEntries(Object.entries(value).slice(0, 60).map(([key, item]) => [
+      key,
+      SENSITIVE_FIELD.test(key) ? "[REDACTED]" : sanitizeToolOutput(item, depth + 1),
+    ]));
+  }
+  return String(value).slice(0, 1000);
+}
+
 async function audit(input, data) {
   try {
     await input.client.db.recordAIAudit(data);
@@ -230,7 +251,7 @@ export async function generateSupportReply(input) {
       functionParts.push({
         functionResponse: {
           name: call.name,
-          response: { result },
+          response: { result: sanitizeToolOutput(result) },
           ...(call.id ? { id: call.id } : {}),
         },
       });
