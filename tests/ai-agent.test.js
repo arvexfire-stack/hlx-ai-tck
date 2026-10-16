@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { toolDeclarations } from "../src/ai/tools.js";
+import { assertResourceOwnership, toolDeclarations } from "../src/ai/tools.js";
 import { buildKnowledgeContext } from "../src/ai/knowledge.js";
 import { config } from "../src/config/config.js";
 import TicketUI from "../src/structures/classes/TicketUI.js";
@@ -85,4 +85,29 @@ test("ticket control panel exposes polished AI support controls", () => {
   assert.match(serialized, /ticket_claim_ticket_0000837/);
   assert.match(serialized, /ticket_transcript_ticket_0000837/);
   assert.match(serialized, /Quick Resolution Guide/);
+});
+
+
+test("AI support resource ownership checks fail closed when owner data is missing", () => {
+  assert.throws(
+    () => assertResourceOwnership({ id: "invoice-1" }, "invoice", "customer-1"),
+    /Unable to verify ownership/i,
+  );
+});
+
+test("AI support resource ownership checks reject another customer's resource", () => {
+  assert.throws(
+    () => assertResourceOwnership({ user_id: "customer-2" }, "service", "customer-1"),
+    /Unable to verify ownership/i,
+  );
+});
+
+test("AI support resource ownership checks accept the verified owner", () => {
+  const resource = { user_id: "customer-1", id: "service-1" };
+  assert.equal(assertResourceOwnership(resource, "service", "customer-1"), resource);
+});
+
+test("AI tool registry never exposes arbitrary shell, SSH, or Docker execution", () => {
+  const names = toolDeclarations.map((tool) => tool.name);
+  assert.equal(names.some((name) => /shell|ssh_exec|docker_exec|execute_command/i.test(name)), false);
 });
