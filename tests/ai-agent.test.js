@@ -118,3 +118,11 @@ test("autonomous AI actions are disabled by default unless explicitly opted in",
     assert.equal(config.ai.autoActions, false);
   }
 });
+
+ 
+test("AI runtime limits stay within safe bounds", () => {
+  assert.ok(config.ai.cooldownMs >= 250 && config.ai.cooldownMs <= 60000);
+  assert.ok(config.ai.historyLimit >= 1 && config.ai.historyLimit <= 25);
+  assert.ok(config.ai.maxToolRounds >= 1 && config.ai.maxToolRounds <= 12);
+  assert.ok(config.ai.providerTimeoutMs >= 1000 && config.ai.providerTimeoutMs <= 120000);
+});
