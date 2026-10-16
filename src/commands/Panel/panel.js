@@ -581,24 +581,75 @@ class PanelCommand extends Command {
           const data = panel?.panelMessage?.toObject?.() || panel?.panelMessage || {};
           data.blocks = Array.isArray(data.blocks) ? data.blocks : [];
           if (data.blocks.length >= 25) { await i.reply({ content: "Maximum 25 components reached.", ephemeral: true }); return; }
-          if (type === "separator") { await i.deferUpdate(); data.blocks.push({ type: "separator", divider: true, spacing: "small" }); await db.setPanelMessage(st.panelId, data); await this._update(ctx,msg,st,db); return; }
+          if (type === "separator") {
+            await i.deferUpdate(); data.blocks.push({ type: "separator", divider: true, spacing: "small" });
+            await db.setPanelMessage(st.panelId, data); await this._update(ctx, msg, st, db); return;
+          }
           st.temp.blockType = type;
-          const title = { text: "Add Text Display", section: "Add Section with Thumbnail", gallery: "Add Media Gallery", links: "Add Link Buttons Row" }[type] || "Add Component";
-          const modal = new ModalBuilder().setCustomId("pmb_add_" + i.id).setTitle(title);
-          if (type === "text") modal.addComponents(new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId("content").setLabel("Text (Markdown supported)").setStyle(TextInputStyle.Paragraph).setMaxLength(4000).setRequired(true)));
-          else if (type === "section") modal.addComponents(new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId("content").setLabel("Section text").setStyle(TextInputStyle.Paragraph).setMaxLength(2000).setRequired(true)), new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId("url").setLabel("Thumbnail HTTPS URL").setStyle(TextInputStyle.Short).setMaxLength(500).setRequired(true)));
-          else if (type === "gallery") modal.addComponents(new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId("urls").setLabel("Media URLs, one per line (max 10)").setStyle(TextInputStyle.Paragraph).setMaxLength(4000).setRequired(true)));
-          else if (type === "links") modal.addComponents(new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId("labels").setLabel("Button labels, one per line (max 5)").setStyle(TextInputStyle.Paragraph).setMaxLength(500).setRequired(true)), new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId("urls").setLabel("Matching HTTPS URLs, one per line").setStyle(TextInputStyle.Paragraph).setMaxLength(2000).setRequired(true)));
+          const title = { text: "Add Text Display", section: "Add Section with Thumbnail", gallery: "Upload Media Gallery", links: "Add Link Buttons Row" }[type] || "Add Component";
+          const modalId = "pmb_add_" + i.id;
+          const modal = new ModalBuilder().setCustomId(modalId).setTitle(title);
+          if (type === "text") {
+            modal.addComponents(new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId("content").setLabel("Text (Markdown supported)").setStyle(TextInputStyle.Paragraph).setMaxLength(4000).setRequired(true)));
+          } else if (type === "section") {
+            modal.addComponents(new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId("content").setLabel("Section text").setStyle(TextInputStyle.Paragraph).setMaxLength(2000).setRequired(true)));
+          } else if (type === "gallery") {
+            modal.addLabelComponents(new LabelBuilder().setLabel("Choose up to 10 images or videos").setDescription("Files are copied to this channel so gallery links remain available.").setFileUploadComponent(new FileUploadBuilder().setCustomId("media").setMinValues(1).setMaxValues(10).setRequired(true)));
+          } else if (type === "links") {
+            modal.addComponents(
+              new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId("labels").setLabel("Button labels, one per line (max 5)").setStyle(TextInputStyle.Paragraph).setMaxLength(500).setRequired(true)),
+              new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId("urls").setLabel("Matching HTTPS URLs, one per line").setStyle(TextInputStyle.Paragraph).setMaxLength(2000).setRequired(true))
+            );
+          }
           await i.showModal(modal);
           try {
-            const sub = await i.awaitModalSubmit({ filter: x => x.customId === "pmb_add_" + i.id, time: 120000 });
+            const sub = await i.awaitModalSubmit({ filter: x => x.customId === modalId && x.user.id === i.user.id, time: 120000 });
             const kind = st.temp.blockType, block = { type: kind };
             if (kind === "text" || kind === "section") block.content = sub.fields.getTextInputValue("content").trim();
-            if (kind === "section") block.url = sub.fields.getTextInputValue("url").trim();
-            if (kind === "gallery") { block.urls = sub.fields.getTextInputValue("urls").split(/\s*\n\s*/).map(x=>x.trim()).filter(Boolean).slice(0,10); if (!block.urls.every(x=>{try{return ["http:","https:"].includes(new URL(x).protocol)}catch{return false}})) { await sub.reply({content:"Use valid HTTP/HTTPS media URLs.",ephemeral:true}); return; } }
-            if (kind === "links") { const labels=sub.fields.getTextInputValue("labels").split(/\s*\n\s*/).map(x=>x.trim()).filter(Boolean).slice(0,5); const urls=sub.fields.getTextInputValue("urls").split(/\s*\n\s*/).map(x=>x.trim()).filter(Boolean).slice(0,5); if (!labels.length || labels.length!==urls.length || !urls.every(x=>{try{return ["http:","https:"].includes(new URL(x).protocol)}catch{return false}})) { await sub.reply({content:"Provide matching button labels and valid HTTP/HTTPS URLs (up to five).",ephemeral:true}); return; } block.buttons=labels.map((label,n)=>({label:label.slice(0,80),url:urls[n]})); }
-            await sub.deferUpdate(); const latest=await db.getPanel(st.panelId); const latestData=latest?.panelMessage?.toObject?.()||latest?.panelMessage||{}; latestData.blocks=Array.isArray(latestData.blocks)?latestData.blocks:[]; if(latestData.blocks.length<25) latestData.blocks.push(block); await db.setPanelMessage(st.panelId,latestData); await this._update(ctx,msg,st,db);
-          } catch(e) { if(e?.code!=="InteractionCollectorError") logger.warn("Panel","Container component add failed",e); }
+            if (kind === "section") {
+              await sub.deferUpdate();
+              const uploadId = "pmb_thumb_" + sub.id;
+              const uploadModal = new ModalBuilder().setCustomId(uploadId).setTitle("Upload Section Thumbnail");
+              uploadModal.addLabelComponents(new LabelBuilder().setLabel("Choose a thumbnail image").setDescription("Upload one image from your device.").setFileUploadComponent(new FileUploadBuilder().setCustomId("media").setMinValues(1).setMaxValues(1).setRequired(true)));
+              await sub.showModal(uploadModal);
+              const uploaded = await sub.awaitModalSubmit({ filter: x => x.customId === uploadId && x.user.id === sub.user.id, time: 120000 });
+              const attachment = uploaded.fields.getUploadedFiles("media")?.first();
+              if (!attachment || !String(attachment.contentType || "").startsWith("image/")) {
+                await uploaded.reply({ content: "Please upload a valid image file for the thumbnail.", ephemeral: true }); return;
+              }
+              const stored = await ctx.channel.send({ content: "Ticket panel thumbnail uploaded by <@" + uploaded.user.id + ">.", files: [{ attachment: attachment.url, name: attachment.name || "panel-thumbnail" }] });
+              const storedAttachment = stored.attachments.first();
+              if (!storedAttachment?.url) throw new Error("Discord did not return a persistent thumbnail URL");
+              block.url = storedAttachment.url;
+              await uploaded.deferUpdate();
+            } else if (kind === "gallery") {
+              const files = sub.fields.getUploadedFiles("media");
+              const attachments = files ? [...files.values()] : [];
+              if (!attachments.length || attachments.length > 10) { await sub.reply({ content: "Upload between 1 and 10 image/video files.", ephemeral: true }); return; }
+              if (attachments.some(a => !/^(image|video)\//.test(String(a.contentType || "")))) { await sub.reply({ content: "Gallery uploads must be image or video files.", ephemeral: true }); return; }
+              await sub.deferUpdate();
+              const stored = await ctx.channel.send({
+                content: "Ticket panel gallery uploaded by <@" + sub.user.id + ">.",
+                files: attachments.map((a, n) => ({ attachment: a.url, name: a.name || "panel-gallery-" + (n + 1) }))
+              });
+              block.urls = [...stored.attachments.values()].map(a => a.url).filter(Boolean).slice(0, 10);
+              if (!block.urls.length) throw new Error("Discord did not return persistent gallery URLs");
+            } else if (kind === "links") {
+              const labels = sub.fields.getTextInputValue("labels").split(/\s*\n\s*/).map(x => x.trim()).filter(Boolean).slice(0, 5);
+              const urls = sub.fields.getTextInputValue("urls").split(/\s*\n\s*/).map(x => x.trim()).filter(Boolean).slice(0, 5);
+              if (!labels.length || labels.length !== urls.length || !urls.every(x => { try { return ["http:", "https:"].includes(new URL(x).protocol); } catch { return false; } })) {
+                await sub.reply({ content: "Provide matching button labels and valid HTTP/HTTPS URLs (up to five).", ephemeral: true }); return;
+              }
+              block.buttons = labels.map((label, n) => ({ label: label.slice(0, 80), url: urls[n] }));
+              await sub.deferUpdate();
+            } else await sub.deferUpdate();
+            const latest = await db.getPanel(st.panelId);
+            const latestData = latest?.panelMessage?.toObject?.() || latest?.panelMessage || {};
+            latestData.blocks = Array.isArray(latestData.blocks) ? latestData.blocks : [];
+            if (latestData.blocks.length < 25) latestData.blocks.push(block);
+            await db.setPanelMessage(st.panelId, latestData);
+            await this._update(ctx, msg, st, db);
+          } catch (e) { if (e?.code !== "InteractionCollectorError") logger.warn("Panel", "Container component add failed", e); }
           return;
         }
         if (id === "pm_block_edit") { await i.deferUpdate(); st.temp.editBlockIndex=Number(i.values[0]); const p=await db.getPanel(st.panelId); const data=p?.panelMessage?.toObject?.()||p?.panelMessage||{}; const b=data.blocks?.[st.temp.editBlockIndex]; if(!b)return; const c=new ContainerBuilder().addTextDisplayComponents(new TextDisplayBuilder().setContent("## Edit Component\n\nType: "+b.type+"\nContent: "+String(b.content||b.url||"No text").slice(0,150))); c.addActionRowComponents(new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId("pm_block_modify").setLabel("Edit Component").setStyle(ButtonStyle.Primary),new ButtonBuilder().setCustomId("pm_block_delete").setLabel("Delete Component").setStyle(ButtonStyle.Danger),new ButtonBuilder().setCustomId("pm_block_up").setLabel("Move Up").setStyle(ButtonStyle.Secondary).setDisabled(st.temp.editBlockIndex===0),new ButtonBuilder().setCustomId("pm_block_down").setLabel("Move Down").setStyle(ButtonStyle.Secondary).setDisabled(st.temp.editBlockIndex>=data.blocks.length-1),new ButtonBuilder().setCustomId("pm_block_back").setLabel("Back").setStyle(ButtonStyle.Primary))); await msg.edit({components:[c],flags:MessageFlags.IsComponentsV2}); return; }
@@ -608,7 +659,7 @@ class PanelCommand extends Command {
           if(!b){await i.deferUpdate();return;}
           const modal=new ModalBuilder().setCustomId("pmb_edit_"+i.id).setTitle("Edit Component");
           modal.addComponents(new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId("content").setLabel("Text / content (blank keeps current)").setStyle(TextInputStyle.Paragraph).setMaxLength(4000).setRequired(false)));
-          if(b.type==="section"||b.type==="gallery") modal.addComponents(new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId("url").setLabel("Media URL(s), one per line").setStyle(TextInputStyle.Paragraph).setMaxLength(4000).setRequired(false)));
+          if(b.type==="section"||b.type==="gallery") modal.addComponents(new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId("url").setLabel("Media URL(s), one per line (optional)").setStyle(TextInputStyle.Paragraph).setMaxLength(4000).setRequired(false)));
           await i.showModal(modal);
           try { const sub=await i.awaitModalSubmit({filter:x=>x.customId==="pmb_edit_"+i.id,time:120000}); const p2=await db.getPanel(st.panelId); const d=p2?.panelMessage?.toObject?.()||p2?.panelMessage||{}; const target=d.blocks?.[st.temp.editBlockIndex]; if(!target){await sub.reply({content:"Component no longer exists.",ephemeral:true});return;} const content=sub.fields.getTextInputValue("content").trim(); if(content)target.content=content; if(target.type==="section"||target.type==="gallery"){const raw=sub.fields.getTextInputValue("url").trim(); if(raw){const urls=raw.split(/\s*\n\s*/).map(x=>x.trim()).filter(Boolean); if(!urls.every(x=>{try{return ["http:","https:"].includes(new URL(x).protocol)}catch{return false}})){await sub.reply({content:"Use valid HTTP/HTTPS media URLs.",ephemeral:true});return;} if(target.type==="section")target.url=urls[0];else target.urls=urls.slice(0,10);}} await sub.deferUpdate(); await db.setPanelMessage(st.panelId,d); await this._update(ctx,msg,st,db); } catch(e){if(e?.code!=="InteractionCollectorError")logger.warn("Panel","Edit component failed",e);} return;
         }
