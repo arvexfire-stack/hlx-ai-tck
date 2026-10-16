@@ -10,6 +10,8 @@ import {
   MessageFlags,
   ButtonStyle,
   ModalBuilder,
+  FileUploadBuilder,
+  LabelBuilder,
   TextInputBuilder,
   TextInputStyle,
   ActionRowBuilder,
@@ -500,8 +502,61 @@ class PanelCommand extends Command {
           return;
         }
 
+        if (["pm_image", "pm_video"].includes(id)) {
+          const isImage = id === "pm_image";
+          const modalId = `pm_upload_${id}_${i.id}`;
+          const upload = new FileUploadBuilder()
+            .setCustomId("media")
+            .setMinValues(1)
+            .setMaxValues(1)
+            .setRequired(true);
+          const modal = new ModalBuilder()
+            .setCustomId(modalId)
+            .setTitle(isImage ? "Upload Panel Image" : "Upload Panel Video");
+          modal.addLabelComponents(
+            new LabelBuilder()
+              .setLabel(isImage ? "Choose an image from your device" : "Choose a video from your device")
+              .setDescription("The selected file will be copied to this channel so its link remains available.")
+              .setFileUploadComponent(upload)
+          );
+          await i.showModal(modal);
+          try {
+            const sub = await i.awaitModalSubmit({ filter: x => x.customId === modalId && x.user.id === i.user.id, time: 120_000 });
+            const files = sub.fields.getUploadedFiles("media");
+            const attachment = files?.first();
+            if (!attachment) {
+              await sub.reply({ content: "No file was received. Please try again.", ephemeral: true });
+              return;
+            }
+            const contentType = String(attachment.contentType || "");
+            if (isImage ? !contentType.startsWith("image/") : !contentType.startsWith("video/")) {
+              await sub.reply({ content: isImage ? "Please upload an image file." : "Please upload a video file.", ephemeral: true });
+              return;
+            }
+            await sub.deferUpdate();
+            // Modal uploads are temporary. Repost the file as a normal channel attachment
+            // so the saved CDN URL remains available for the published panel.
+            const stored = await ctx.channel.send({
+              content: `Panel ${isImage ? "image" : "video"} asset uploaded by <@${sub.user.id}>.`,
+              files: [{ attachment: attachment.url, name: attachment.name || (isImage ? "panel-image" : "panel-video") }]
+            });
+            const storedAttachment = stored.attachments.first();
+            if (!storedAttachment?.url) throw new Error("Discord did not return a persistent media attachment URL");
+            const latest = await db.getPanel(st.panelId);
+            const data = latest?.panelMessage?.toObject?.() || latest?.panelMessage || {};
+            data[isImage ? "imageUrl" : "videoUrl"] = storedAttachment.url;
+            await db.setPanelMessage(st.panelId, data);
+            await this._update(ctx, msg, st, db);
+          } catch (e) {
+            if (e?.code !== "InteractionCollectorError") {
+              logger.error("Panel", "Media upload failed", e);
+              try { await ctx.author.send("The panel media upload failed. Check that the bot can attach files in the channel where you ran the panel command."); } catch {}
+            }
+          }
+          return;
+        }
         if (id === "pm_upload_help") {
-          await i.reply({ content: "Discord does not expose your phone gallery directly from a normal button. For now, add direct HTTPS media links in Media Gallery; file-upload dialogs depend on Discord client/API support.", ephemeral: true });
+          await i.reply({ content: "Use Add / Change Image or Add / Change Video, then choose a file from your device in Discord's upload dialog. The uploaded asset is copied into the current channel to keep its CDN URL available.", ephemeral: true });
           return;
         }
         if (id === "pm_block_add") {
