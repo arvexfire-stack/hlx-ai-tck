@@ -218,6 +218,13 @@ export async function generateSupportReply(input) {
           result = { skipped: true, reason: "Human staff takeover is already active." };
         } else {
           if (!handler) throw new Error("Tool is not available.");
+          const latestTicket = await input.client.db.getTicket(input.ticket.ticketId);
+          if (!latestTicket || latestTicket.status !== "open") {
+            throw new Error("This ticket is no longer open; no further AI actions are allowed.");
+          }
+          if (latestTicket.aiStats?.humanTakeover && call.name !== "escalate_to_staff") {
+            throw new Error("Human staff takeover is active; AI tools are paused for this ticket.");
+          }
           result = await handler(call.args || {});
           if (call.name === "escalate_to_staff" && result?.escalated === true) staffEscalated = true;
         }
