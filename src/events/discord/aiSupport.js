@@ -83,6 +83,10 @@ export default {
         category,
       });
 
+      const latestTicket = await client.db.getTicket(ticket.ticketId);
+      if (!latestTicket || latestTicket.status !== "open") return;
+      if (latestTicket.aiStats?.humanTakeover && result.reason !== "human_escalation") return;
+
       const text = result.text?.trim();
 
       if (!text) {
