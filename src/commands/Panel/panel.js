@@ -607,7 +607,6 @@ class PanelCommand extends Command {
             const kind = st.temp.blockType, block = { type: kind };
             if (kind === "text" || kind === "section") block.content = sub.fields.getTextInputValue("content").trim();
             if (kind === "section") {
-              await sub.deferUpdate();
               const uploadId = "pmb_thumb_" + sub.id;
               const uploadModal = new ModalBuilder().setCustomId(uploadId).setTitle("Upload Section Thumbnail");
               uploadModal.addLabelComponents(new LabelBuilder().setLabel("Choose a thumbnail image").setDescription("Upload one image from your device.").setFileUploadComponent(new FileUploadBuilder().setCustomId("media").setMinValues(1).setMaxValues(1).setRequired(true)));
