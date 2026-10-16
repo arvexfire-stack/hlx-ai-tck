@@ -333,34 +333,44 @@ class PanelCommand extends Command {
 
   async _messageEdit(ctx, st, db) {
     const p = await db.getPanel(st.panelId);
-    if (!p) return this._msg("Panel Not Found","Create a panel before editing its message.");
+    if (!p) return this._msg("Panel Not Found", "Create a panel before editing its message.");
     const m = p.panelMessage?.toObject?.() || p.panelMessage || {};
+    const blocks = Array.isArray(m.blocks) ? m.blocks : [];
     const c = new ContainerBuilder();
     if (Number.isInteger(m.accentColor)) c.setAccentColor(m.accentColor);
     c.addTextDisplayComponents(new TextDisplayBuilder().setContent(
-      `## Edit Ticket Panel Message\n\n**Title:** ${m.title || "Ticket Panel"}\n**Description:** ${(m.description || "Select a ticket category below to create a ticket").slice(0,180)}${(m.description || "").length>180?"…":""}\n**Image:** ${m.imageUrl?"Configured":"Not set"}\n**Video link:** ${m.videoUrl?"Configured":"Not set"}\n**Footer:** ${m.footer || "Not set"}\n**Accent color:** ${Number.isInteger(m.accentColor)?"#"+m.accentColor.toString(16).padStart(6,"0"):"Default"}\n**Separators:** ${m.showSeparators===false?"OFF":"ON"}\n\nChoose a setting below. Changes are saved automatically.`
+      `## Container Builder\n\n**Title:** ${m.title || "Ticket Panel"}\n**Description:** ${(m.description || "Select a ticket category below to create a ticket").slice(0, 120)}\n**Accent Color:** ${Number.isInteger(m.accentColor) ? "#" + m.accentColor.toString(16).padStart(6, "0") : "none"}\n**Target Channel:** Select when sending\n**Blocks:** ${blocks.length}/25\n\nAdd components, then select one to edit or remove it.`
     ));
     c.addSeparatorComponents(new SeparatorBuilder().setSpacing(SeparatorSpacingSize.Small).setDivider(true));
+    if (blocks.length) {
+      c.addTextDisplayComponents(new TextDisplayBuilder().setContent(blocks.map((b, n) => `${n + 1}. **${b.type}** — ${(b.content || b.url || b.label || "Component").slice(0, 70)}`).join("\\n")));
+      c.addActionRowComponents(new ActionRowBuilder().addComponents(
+        new StringSelectMenuBuilder().setCustomId("pm_block_edit").setPlaceholder("Select a component to edit/delete").addOptions(
+          blocks.slice(0, 25).map((b, n) => ({ label: `${n + 1}. ${b.type}`.slice(0, 100), description: (b.content || b.url || b.label || "Component").slice(0, 100), value: String(n) }))
+        )
+      ));
+    } else {
+      c.addTextDisplayComponents(new TextDisplayBuilder().setContent("*Empty container. Use the controls below to add components.*"));
+    }
+    c.addActionRowComponents(new ActionRowBuilder().addComponents(
+      new StringSelectMenuBuilder().setCustomId("pm_block_add").setPlaceholder("Add a new component...").addOptions(
+        { label: "Text Display", description: "Formatted text (Markdown supported)", value: "text" },
+        { label: "Section with Thumbnail", description: "Text content with a thumbnail image", value: "section" },
+        { label: "Separator", description: "Spacer line, optionally with divider", value: "separator" },
+        { label: "Media Gallery", description: "Upload images/videos or add media URLs", value: "gallery" },
+        { label: "Link Buttons Row", description: "Up to five link buttons", value: "links" }
+      )
+    ));
     c.addActionRowComponents(new ActionRowBuilder().addComponents(
       new ButtonBuilder().setCustomId("pm_title").setLabel("Edit Title").setStyle(ButtonStyle.Secondary),
-      new ButtonBuilder().setCustomId("pm_description").setLabel("Edit Description").setStyle(ButtonStyle.Secondary)
+      new ButtonBuilder().setCustomId("pm_description").setLabel("Edit Description").setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId("pm_color").setLabel("Set Accent Color").setStyle(ButtonStyle.Primary),
+      new ButtonBuilder().setCustomId("pm_sep").setLabel(`Separators: ${m.showSeparators === false ? "OFF" : "ON"}`).setStyle(m.showSeparators === false ? ButtonStyle.Secondary : ButtonStyle.Success)
     ));
     c.addActionRowComponents(new ActionRowBuilder().addComponents(
-      new ButtonBuilder().setCustomId("pm_image").setLabel("Set Image URL").setStyle(ButtonStyle.Primary),
-      new ButtonBuilder().setCustomId("pm_video").setLabel("Set Video Link").setStyle(ButtonStyle.Primary),
-      new ButtonBuilder().setCustomId("pm_footer").setLabel("Edit Footer").setStyle(ButtonStyle.Secondary)
+      new ButtonBuilder().setCustomId("pm_upload_help").setLabel("Media Upload Help").setStyle(ButtonStyle.Primary),
+      new ButtonBuilder().setCustomId("panel_back").setLabel("Back to Main").setStyle(ButtonStyle.Secondary)
     ));
-    c.addActionRowComponents(new ActionRowBuilder().addComponents(
-      new ButtonBuilder().setCustomId("pm_color").setLabel("Accent Color").setStyle(ButtonStyle.Primary),
-      new ButtonBuilder().setCustomId("pm_sep").setLabel(`Separators: ${m.showSeparators===false?"OFF":"ON"}`).setStyle(m.showSeparators===false?ButtonStyle.Secondary:ButtonStyle.Success)
-    ));
-    c.addActionRowComponents(new ActionRowBuilder().addComponents(
-      new ButtonBuilder().setCustomId("pm_clear_image").setLabel("Clear Image").setStyle(ButtonStyle.Danger).setDisabled(!m.imageUrl),
-      new ButtonBuilder().setCustomId("pm_clear_video").setLabel("Clear Video").setStyle(ButtonStyle.Danger).setDisabled(!m.videoUrl),
-      new ButtonBuilder().setCustomId("pm_clear_footer").setLabel("Clear Footer").setStyle(ButtonStyle.Danger).setDisabled(!m.footer),
-      new ButtonBuilder().setCustomId("pm_clear_color").setLabel("Reset Color").setStyle(ButtonStyle.Danger).setDisabled(!Number.isInteger(m.accentColor))
-    ));
-    c.addActionRowComponents(new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId("panel_back").setLabel("Back to Main").setStyle(ButtonStyle.Secondary)));
     return c;
   }
 
