@@ -432,7 +432,7 @@ class PanelCommand extends Command {
                 .setCustomId("description")
                 .setLabel("Description")
                 .setStyle(TextInputStyle.Paragraph)
-                .setMaxLength(500)
+                .setMaxLength(4000)
                 .setValue(p.panelMessage?.description || "Select a category below to create a ticket")
                 .setRequired(true)
             )
