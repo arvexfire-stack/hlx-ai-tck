@@ -4,7 +4,7 @@ import { buildSupportPrompt, formatHistory } from "../src/ai/support.js";
 
 test("buildSupportPrompt creates a multilingual, service-aware support agent", () => {
   const prompt = buildSupportPrompt({
-    guildName: "HelzerX Studio",
+    guildName: "HelzerX Technologies",
     categoryName: "Account Issue",
     categoryDescription: "Login, password reset, or client area account problems",
     customerName: "Customer",
@@ -12,7 +12,7 @@ test("buildSupportPrompt creates a multilingual, service-aware support agent", (
     latestMessage: "Can you check it?",
   });
 
-  assert.match(prompt, /HelzerX Studio/);
+  assert.match(prompt, /HelzerX Technologies/);
   assert.match(prompt, /Sinhala, Singlish/i);
   assert.match(prompt, /orders, billing, payments, domains, Minecraft, AI agents, VPS/i);
   assert.match(prompt, /Never invent prices, plans, policies, refunds, payment status/i);
@@ -31,7 +31,7 @@ test("buildSupportPrompt creates a multilingual, service-aware support agent", (
 
 test("buildSupportPrompt routes payment decisions to staff", () => {
   const prompt = buildSupportPrompt({
-    guildName: "HelzerX Studio",
+    guildName: "HelzerX Technologies",
     categoryName: "Billing",
     customerName: "Customer",
     history: [],
@@ -58,13 +58,13 @@ test("buildSupportPrompt prevents secret collection and hidden-context disclosur
 
 test("buildSupportPrompt gives the AI a natural category-specific playbook", () => {
   const prompt = buildSupportPrompt({
-    guildName: "HelzerX Studio",
+    guildName: "HelzerX Technologies",
     categoryName: "Minecraft Hosting",
     categoryDescription: "Minecraft server performance and hosting support",
     customerName: "Player",
     history: [
       { parts: [{ text: "Player: server eka lag wenawa" }] },
-      { parts: [{ text: "HelzerX Studio Support: How many players are usually online?" }] },
+      { parts: [{ text: "HelzerX Technologies Support: How many players are usually online?" }] },
     ],
     latestMessage: "around 8 players",
   });
@@ -73,7 +73,7 @@ test("buildSupportPrompt gives the AI a natural category-specific playbook", () 
   assert.match(prompt, /Java\/Bedrock/i);
   assert.match(prompt, /Do not invent performance guarantees/i);
   assert.match(prompt, /Do not ask for information the customer already provided/i);
-  assert.match(prompt, /Latest customer message for context: around 8 players/i);
+  assert.match(prompt, /<untrusted_latest_message>[\\s\\S]*around 8 players[\\s\\S]*<\\/untrusted_latest_message>/i);
 });
 
 test("formatHistory preserves ticket context for the prompt without requiring Gemini model turns", () => {
@@ -85,7 +85,7 @@ test("formatHistory preserves ticket context for the prompt without requiring Ge
   assert.equal(history.length, 2);
   assert.equal(history[0].role, "user");
   assert.equal(history[1].role, "model");
-  assert.match(history[1].parts[0].text, /HelzerX Studio Support/i);
+  assert.match(history[1].parts[0].text, /HelzerX Technologies Support/i);
 });
 
  
