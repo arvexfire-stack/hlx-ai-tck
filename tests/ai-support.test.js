@@ -112,11 +112,11 @@ test("sanitizeToolOutput redacts secret fields and common token patterns", () =>
   assert.equal(safe.status, "online");
   assert.equal(safe.api_token, "[REDACTED]");
   assert.equal(safe.nested.password, "[REDACTED]");
-  assert.match(safe.nested.message, /Bearer \\[REDACTED\\]/);
+  assert.equal(safe.nested.message, "Authorization: Bearer [REDACTED]");
 });
 
 test("sanitizeToolOutput bounds strings, arrays, and nesting", () => {
   assert.equal(sanitizeToolOutput("x".repeat(5000)).length, 4000);
   assert.equal(sanitizeToolOutput(Array.from({ length: 30 }, (_, i) => i)).length, 20);
-  assert.equal(sanitizeToolOutput({ a: { b: { c: { d: { e: { f: "too deep" } } } } }).a.b.c.d.e.f, "[TRUNCATED]");
+  assert.equal(sanitizeToolOutput({ a: { b: { c: { d: { e: { f: "too deep" } } } } } }).a.b.c.d.e, "[TRUNCATED]");
 });
