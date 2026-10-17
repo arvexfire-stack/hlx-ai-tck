@@ -68,8 +68,15 @@ export async function readHelzerXWebsite(inputUrl) {
     throw new Error("Provide a valid URL from an official HelzerX website.");
   }
   const site = HELZERX_SITES.find((item) => item.host === url.hostname.toLowerCase());
-  if (!site || url.protocol !== "https:" || url.username || url.password || isPrivateAddress(url.hostname)) {
-    throw new Error("For safety, this reader can only open HTTPS pages on official HelzerX domains.");
+  if (
+    !site ||
+    url.protocol !== "https:" ||
+    (url.port && url.port !== "443") ||
+    url.username ||
+    url.password ||
+    isPrivateAddress(url.hostname)
+  ) {
+    throw new Error("For safety, this reader can only open HTTPS pages on official HelzerX domains using the standard HTTPS port.");
   }
   url.hash = "";
   const response = await fetchWithTimeout(url);
