@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { buildSupportPrompt, formatHistory, normalizeMessageContent, sanitizeToolOutput } from "../src/ai/support.js";
+import { buildSupportPrompt, formatHistory, generateContentWithRetry, normalizeMessageContent, sanitizeToolOutput } from "../src/ai/support.js";
 
 test("buildSupportPrompt creates a multilingual, service-aware support agent", () => {
   const prompt = buildSupportPrompt({
@@ -156,3 +156,52 @@ test("normalizeMessageContent includes bounded latest-message attachments and em
   assert.match(normalized, /Server failed on startup/);
   assert.ok(normalized.length <= 6000);
 });
+
+
+test("generateContentWithRetry retries transient 503 errors and then succeeds", async () => {
+  let calls = 0;
+  const sleeps = [];
+  const result = await generateContentWithRetry(async () => {
+    calls += 1;
+    if (calls < 3) {
+      const error = new Error("This model is currently experiencing high demand.");
+      error.status = 503;
+      throw error;
+    }
+    return { text: "available" };
+  }, { delayMs: 10, sleep: async (ms) => { sleeps.push(ms); } });
+
+  assert.deepEqual(result, { text: "available" });
+  assert.equal(calls, 3);
+  assert.deepEqual(sleeps, [10, 20]);
+});
+
+test("generateContentWithRetry does not retry permanent provider errors", async () => {
+  let calls = 0;
+  const error = new Error("User location is not supported for the API use.");
+  error.status = 400;
+
+  await assert.rejects(
+    generateContentWithRetry(async () => { calls += 1; throw error; }, {
+      delayMs: 1,
+      sleep: async () => {},
+    }),
+    /User location is not supported/,
+  );
+  assert.equal(calls, 1);
+});
+
+test("generateContentWithRetry stops after the configured attempt limit", async () => {
+  let calls = 0;
+  await assert.rejects(
+    generateContentWithRetry(async () => {
+      calls += 1;
+      const error = new Error("temporarily unavailable");
+      error.status = 503;
+      throw error;
+    }, { attempts: 3, delayMs: 1, sleep: async () => {} }),
+    /temporarily unavailable/,
+  );
+  assert.equal(calls, 3);
+});
+
