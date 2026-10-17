@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { assertResourceOwnership, toolDeclarations } from "../src/ai/tools.js";
+import { assertResourceOwnership, resolvePaidVpsPlans, toolDeclarations } from "../src/ai/tools.js";
 import { getMinecraftPricing } from "../src/ai/pricing.js";
 import { buildKnowledgeContext } from "../src/ai/knowledge.js";
 import { config } from "../src/config/config.js";
@@ -153,4 +153,32 @@ test("Minecraft pricing calculator lists processor totals without assuming a pro
 
 test("AI tool registry exposes deterministic Minecraft price lookup", () => {
   assert.ok(toolDeclarations.some((tool) => tool.name === "get_minecraft_pricing"));
+});
+
+
+test("paid VPS plan lookup never substitutes the invite-reward VPS plan", async () => {
+  let fetched = false;
+  await assert.rejects(
+    resolvePaidVpsPlans({
+      enabled: false,
+      fetchPlans: async () => { fetched = true; return { plans: config.invitePlans }; },
+    }),
+    /integration is not configured/i,
+  );
+  assert.equal(fetched, false);
+});
+
+test("paid VPS plan lookup rejects an empty catalog rather than guessing a price", async () => {
+  await assert.rejects(
+    resolvePaidVpsPlans({ enabled: true, fetchPlans: async () => ({ plans: [] }) }),
+    /returned no paid plans/i,
+  );
+});
+
+test("paid VPS plan lookup accepts verified plan data from the VPS integration", async () => {
+  const data = { plans: [{ id: "vps-8gb", name: "8GB VPS", ram_mb: 8192, price: 5 }] };
+  assert.deepEqual(
+    await resolvePaidVpsPlans({ enabled: true, fetchPlans: async () => data }),
+    data,
+  );
 });
