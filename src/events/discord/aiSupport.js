@@ -127,9 +127,10 @@ export default {
       logger.info("AI Support", "Completed ticket " + ticket.ticketId + ": hasText=" + Boolean(text) + ", toolCalls=" + result.toolCalls + ", reason=" + (result.reason || "none") + ".");
 
       if (!text) {
+        // An empty provider response is a recoverable AI failure, not a staff claim.
+        // Keep the ticket eligible for a later customer message after notifying staff.
         await client.db.updateTicket(ticket.ticketId, {
           "aiStats.escalated": true,
-          "aiStats.humanTakeover": true,
           "aiStats.priority": "normal",
           "aiStats.intent": "ai_no_response",
           "aiStats.lastError": "AI returned no customer-facing response.",
@@ -165,9 +166,10 @@ export default {
       if (result.reason === "max_tool_rounds" || result.reason === "empty_model_response") {
         const emptyResponse = result.reason === "empty_model_response";
         const diagnostic = result.diagnostic || {};
+        // Tool-limit and empty-response guardrails should not permanently mute AI.
+        // A staff member can still claim the ticket explicitly when needed.
         await client.db.updateTicket(ticket.ticketId, {
           "aiStats.escalated": true,
-          "aiStats.humanTakeover": true,
           "aiStats.priority": "normal",
           "aiStats.intent": emptyResponse ? "ai_no_response" : "ai_tool_limit",
           "aiStats.lastError": emptyResponse
