@@ -151,7 +151,7 @@ test("normalizeMessageContent includes bounded latest-message attachments and em
     embeds: [{ title: "Crash report", description: "Server failed on startup" }],
   };
   const normalized = normalizeMessageContent(message);
-  assert.match(normalized, /Attachment: crash.log; type: text\\/plain/);
+  assert.match(normalized, /Attachment: crash.log; type: text\/plain/);
   assert.match(normalized, /Crash report/);
   assert.match(normalized, /Server failed on startup/);
   assert.ok(normalized.length <= 6000);
