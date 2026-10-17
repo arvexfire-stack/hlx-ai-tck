@@ -7,8 +7,21 @@ import { logger } from "#utils/logger";
 const seenMessageIds = new Set();
 const messageQueues = new Map();
 
-const isStaffMessage = (message, category) =>
-  category?.supportRoles?.some((roleId) => message.member?.roles?.cache?.has(roleId)) || false;
+// A configured ticket role alone is not sufficient proof of staff activity: some
+// servers accidentally grant the same "Support" role to customers. Only suppress
+// AI when the author has a staff-level Discord permission AND a configured support role.
+const isStaffMessage = (message, category) => {
+  const hasSupportRole = category?.supportRoles?.some((roleId) =>
+    message.member?.roles?.cache?.has(roleId),
+  ) || false;
+  const permissions = message.member?.permissions;
+  const hasStaffPermission = Boolean(
+    permissions?.has?.("Administrator")
+    || permissions?.has?.("ManageMessages")
+    || permissions?.has?.("ManageChannels"),
+  );
+  return hasSupportRole && hasStaffPermission;
+};
 
 const FALLBACK_REPLY =
   "I’m having trouble checking that reliably right now. I don’t want to guess, so I’ve handed this over to the support team.";
