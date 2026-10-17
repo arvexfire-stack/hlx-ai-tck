@@ -97,6 +97,18 @@ export const toolDeclarations = [
   }, ["reason"]),
 ];
 
+export async function resolvePaidVpsPlans({ enabled, fetchPlans }) {
+  if (!enabled) {
+    throw new Error("Paid VPS plans are unavailable because the VPS plans integration is not configured. Do not infer or quote a price; escalate for a verified quote.");
+  }
+  const result = await fetchPlans();
+  const plans = Array.isArray(result?.plans) ? result.plans : [];
+  if (plans.length === 0) {
+    throw new Error("The VPS plans integration returned no paid plans. Do not infer or quote a price; escalate for a verified quote.");
+  }
+  return result;
+}
+
 const recordOwnerId = (record) => record?.user_id ?? record?.customer_id ?? record?.owner_id ?? record?.discord_user_id ?? null;
 
 // Fail closed: a missing owner field is not proof that the caller owns the resource.
@@ -229,17 +241,11 @@ export function createToolExecutor({ client, message, ticket, category }) {
       return client.inviteTracker.getUserInvites(message.guild, userId);
     },
     async get_vps_plans() {
-      // Invite-reward VPS is not the paid VPS catalog. Never substitute it for
-      // paid pricing when the VPS bot integration is missing or unavailable.
-      if (!vps.enabled) {
-        throw new Error("Paid VPS plans are unavailable because the VPS plans integration is not configured. Do not infer or quote a price; escalate for a verified quote.");
-      }
-      const result = await vps.plans();
-      const plans = Array.isArray(result?.plans) ? result.plans : [];
-      if (plans.length === 0) {
-        throw new Error("The VPS plans integration returned no paid plans. Do not infer or quote a price; escalate for a verified quote.");
-      }
-      return result;
+      // Invite-reward VPS is not the paid VPS catalog.
+      return resolvePaidVpsPlans({
+        enabled: vps.enabled,
+        fetchPlans: () => vps.plans(),
+      });
     },
     async get_vps_nodes() {
       if (!vps.enabled) throw new Error("VPS bot integration is not configured.");
