@@ -1,5 +1,5 @@
 import { config } from "#config/config";
-import { generateSupportReply, formatHistory, normalizeMessageContent } from "#ai/support";
+import { generateSupportReply, formatHistory, normalizeMessageContent, isQuotaExhaustedError } from "#ai/support";
 import TicketUI from "#structures/classes/TicketUI";
 import { logger } from "#utils/logger";
 
@@ -225,11 +225,14 @@ export default {
         logger.warn("AI Support", "Guardrail used for ticket " + ticket.ticketId + ": " + result.reason + diagnostic);
       }
     } catch (error) {
-      logger.error("AI Support", "Failed to process ticket " + ticket.ticketId, error);
+      const quotaExhausted = isQuotaExhaustedError(error);
+      logger.error("AI Support", "Failed to process ticket " + ticket.ticketId + (quotaExhausted ? ": Gemini API quota exhausted; not retrying this request." : ""), error);
 
       try {
         await message.channel.send({
-          content: FALLBACK_REPLY,
+          content: quotaExhausted
+            ? "I can’t run the AI check right now because the AI provider has reached its request limit. I’ve notified the support team; please continue here and a staff member can help. This ticket has not been permanently handed over, so automated replies can resume when the provider quota is available."
+            : FALLBACK_REPLY,
           allowedMentions: { parse: [] },
         });
 
@@ -248,7 +251,9 @@ export default {
           message,
           ticket,
           category,
-          reason: "The AI provider failed while processing this message. Staff have been notified; the AI will remain available for a later customer message.",
+          reason: quotaExhausted
+            ? "The Gemini API project has exhausted its current request quota. No rapid retries will be made; AI handling can resume when quota becomes available."
+            : "The AI provider failed while processing this message. Staff have been notified; the AI will remain available for a later customer message.",
         });
       } catch (fallbackError) {
         logger.error("AI Support", "Failed to send AI fallback for ticket " + ticket.ticketId, fallbackError);
