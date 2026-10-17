@@ -27,29 +27,55 @@ const QUOTA_ERROR_MARKER = "Gemini API quota exhausted";
 let quotaCooldownUntil = 0;
 
 export function classifyProviderFailure(error) {
-  if (isQuotaExhaustedError(error)) {
+  const rawMessage = String(error?.message || error?.error?.message || error || "");
+  let parsed = null;
+  try {
+    parsed = JSON.parse(rawMessage);
+  } catch {}
+  const providerError = parsed?.error || error?.error || {};
+  const providerMessage = String(providerError.message || rawMessage);
+  const status = Number(error?.status || error?.code || providerError.code || 0);
+  const combinedError = {
+    ...error,
+    status: status || error?.status,
+    message: providerMessage + " " + String(providerError.status || ""),
+  };
+
+  if (isQuotaExhaustedError({ ...combinedError, message: rawMessage + " " + providerMessage, status })) {
     return {
       code: "gemini_quota_exhausted",
-      customerMessage: "Gemini has reached this project's daily request quota. I can't verify the requested information until the quota becomes available again.",
-      staffReason: "Gemini API daily free-tier request quota is exhausted (HTTP 429 / RESOURCE_EXHAUSTED). No AI-generated diagnosis is available because the model request was rejected before generating a response.",
-      retryDelayMs: quotaRetryDelayMs(error),
+      staffReason: "Gemini API request quota is exhausted (HTTP 429 / RESOURCE_EXHAUSTED). The provider rejected the request before generating a response. Check the active Google AI project, model-specific quota, and reset time.",
+      retryDelayMs: quotaRetryDelayMs({ message: rawMessage + " " + providerMessage }),
     };
   }
 
-  const message = String(error?.message || "");
-  if (/timed out|timeout/i.test(message)) {
+  if (/timed out|timeout|ETIMEDOUT|ECONNRESET|EAI_AGAIN/i.test(rawMessage)) {
     return {
       code: "ai_provider_timeout",
-      customerMessage: "The AI provider did not respond before the request timed out. I couldn't verify the answer, so please continue with support staff while the service recovers.",
-      staffReason: "The AI provider request timed out before producing a response. This is a provider/network timeout, not an AI-generated diagnosis; check provider latency and connectivity.",
+      staffReason: "The AI provider request timed out or the network connection failed before a response was generated. Check provider latency, DNS/network connectivity, and the configured timeout.",
       retryDelayMs: 60_000,
+    };
+  }
+
+  if (/API key not valid|invalid API key|API_KEY_INVALID|unauthenticated|permission denied|PERMISSION_DENIED/i.test(providerMessage) || status === 401 || status === 403) {
+    return {
+      code: "ai_provider_auth_error",
+      staffReason: "Google AI rejected the configured API key or denied this model/project access. Verify the GEMINI_API_KEY loaded by the running service, that the key belongs to the intended Google AI project, and that the selected model is enabled. Never post the key in Discord or logs.",
+      retryDelayMs: 5 * 60_000,
+    };
+  }
+
+  if (/model .*not found|not found for API version|unsupported model|is not supported/i.test(providerMessage)) {
+    return {
+      code: "ai_model_unavailable",
+      staffReason: "The configured Gemini model is unavailable or unsupported for this API/project. Verify GEMINI_MODEL against the models available to the active API key.",
+      retryDelayMs: 5 * 60_000,
     };
   }
 
   return {
     code: "ai_provider_error",
-    customerMessage: "The AI provider returned an error before I could verify the answer. I don't want to guess, so support staff have been notified.",
-    staffReason: "The AI provider request failed before generating a response. Review the restricted service logs for the underlying provider error.",
+    staffReason: "The AI provider request failed before generating a response (HTTP/status " + (status || "unknown") + "). Check the restricted service logs for the provider error message, model access, and current quota.",
     retryDelayMs: 60_000,
   };
 }
