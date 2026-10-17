@@ -31,7 +31,7 @@ let quotaCooldownUntil = 0;
 
 function quotaRetryDelayMs(error) {
   const message = String(error?.message || "");
-  const retrySeconds = message.match(/retry in\\s+(?:(\\d+)h)?(?:(\\d+)m)?(?:(\\d+(?:\\.\\d+)?)s)?/i);
+  const retrySeconds = message.match(/retry in\s+(?:(\d+)h)?(?:(\d+)m)?(?:(\d+(?:\.\d+)?)s)?/i);
   if (retrySeconds) {
     const hours = Number(retrySeconds[1] || 0);
     const minutes = Number(retrySeconds[2] || 0);
