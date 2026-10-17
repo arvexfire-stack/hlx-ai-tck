@@ -76,7 +76,7 @@ export async function readHelzerXWebsite(inputUrl) {
     url.password ||
     isPrivateAddress(url.hostname)
   ) {
-    throw new Error("For safety, this reader can only open HTTPS pages on official HelzerX domains using the standard HTTPS port.");
+    throw new Error("For safety, only HTTPS pages on official HelzerX domains using the standard HTTPS port can be opened.");
   }
   url.hash = "";
   const response = await fetchWithTimeout(url);
