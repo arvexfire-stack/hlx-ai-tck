@@ -19,6 +19,41 @@ const withTimeout = async (promise, timeoutMs) => {
   }
 };
 
+// A daily/project quota exhaustion will not recover after a short retry. Retrying it
+// wastes requests and delays the fallback; keep retries for genuinely transient failures.
+export const isQuotaExhaustedError = (error) => {
+  const message = String(error?.message || error?.error?.message || "");
+  const status = Number(error?.status || error?.code || error?.error?.code || 0);
+  return status === 429 && /quota|resource_exhausted|rate.?limit/i.test(message)
+    || /RESOURCE_EXHAUSTED/i.test(message) && /quota exceeded|free.?tier|per.?day|retry in \d/i.test(message);
+};
+
+const isRetryableProviderError = (error) => {
+  if (isQuotaExhaustedError(error)) return false;
+  const status = Number(error?.status || error?.code || error?.error?.code || 0);
+  const message = String(error?.message || "");
+  return [408, 429, 500, 502, 503, 504].includes(status)
+    || /\b(RESOURCE_EXHAUSTED|UNAVAILABLE|INTERNAL|DEADLINE_EXCEEDED|ECONNRESET|ETIMEDOUT|EAI_AGAIN)\b/i.test(message);
+};
+
+export async function generateContentWithRetry(generate, {
+  attempts = 3,
+  delayMs = 800,
+  sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+} = {}) {
+  let lastError;
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    try {
+      return await generate();
+    } catch (error) {
+      lastError = error;
+      if (attempt === attempts - 1 || !isRetryableProviderError(error)) throw error;
+      await sleep(delayMs * (2 ** attempt));
+    }
+  }
+  throw lastError;
+}
+
 const SENSITIVE_FIELD = /password|passphrase|secret|token|api[_-]?key|private[_-]?key|authorization|cookie|session|cvv|card[_-]?number|client[_-]?secret/i;
 
 export function sanitizeToolOutput(value, depth = 0) {
@@ -73,7 +108,7 @@ const categoryPlaybook = (categoryName = "", categoryDescription = "") => {
   return "General support playbook: first identify what the customer is trying to accomplish, then use the minimum necessary tool or question to move the issue forward.";
 };
 
-function normalizeMessageContent(message) {
+export function normalizeMessageContent(message) {
   const text = String(message.content || "").trim();
   const attachments = [...(message.attachments?.values?.() || [])]
     .slice(0, 5)
@@ -148,6 +183,7 @@ export function buildSupportPrompt({
     "For simple acknowledgements, confirmations, thanks, or casual conversation, answer naturally and briefly. Do not turn every message into a support workflow or tool call.",
     "When a ticket starts with a vague request, first understand the customer's goal from their wording. Use category context as background, not as a reason to assume the issue.",
     "For service questions, prefer a helpful answer plus the single next step that matters. If the customer needs a choice, present the relevant options clearly instead of asking a broad 'what do you need?' question.",
+    "For VPS plan, VPS price, RAM-size, or plan-comparison questions, call the get_vps_plans tool before answering. Use only the returned plan names, RAM, CPU, storage, duration, and price fields; do not substitute Minecraft plans or infer a price from RAM alone. Preserve VPS intent across short follow-ups such as 'Then 6GB?'. Never append unrelated Minecraft explanations. If the tool fails or the returned plans do not include the requested RAM size and price, answer in 1-3 short sentences: say the exact price cannot currently be verified, link https://cloud.helzerx.cyou, and call escalate_to_staff with a concise reason instead of asking whether the customer wants staff help.",
     "For Minecraft pricing, distinguish the RAM plan base price from the processor fee. If the customer asks for a RAM plan price first, give the base price and mention that processor selection affects the final total. If they ask about processors, explain Ryzen 5, Ryzen 7, Xeon Gold, and AMD EPYC 9965 with their additional monthly fees and calculate the total for the selected RAM plan.",
     "When explaining processor pricing, use this exact model: Ryzen 5 +$1.30/month, Ryzen 7 +$2.40/month, Xeon Gold +$2.90/month, AMD EPYC 9965 +$3.40/month. Final price = RAM plan base price + processor fee. Do not invent benchmarks, player limits, TPS, or performance guarantees.",
     "When the customer describes a problem, identify the likely intent before responding. Ask one focused question at a time when more information is actually needed.",
@@ -203,7 +239,7 @@ export async function generateSupportReply(input) {
   let toolCalls = 0;
 
   const requestConfig = {
-    maxOutputTokens: 1000,
+    maxOutputTokens: 4096,
     thinkingConfig: {
       thinkingLevel: config.ai.thinkingLevel,
     },
@@ -212,23 +248,45 @@ export async function generateSupportReply(input) {
   };
 
   for (let round = 0; round < config.ai.maxToolRounds; round += 1) {
-    const response = await withTimeout(
-      client.models.generateContent({
-        model: input.model || config.ai.model,
-        contents,
-        config: requestConfig,
-      }),
-      config.ai.providerTimeoutMs,
+    const response = await generateContentWithRetry(
+      () => withTimeout(
+        client.models.generateContent({
+          model: input.model || config.ai.model,
+          contents,
+          config: requestConfig,
+        }),
+        config.ai.providerTimeoutMs,
+      ),
+      { attempts: 3, delayMs: 800 },
     );
 
     const calls = response.functionCalls || [];
     if (!calls.length) {
-      const text = response.text?.trim() || "";
+      const candidate = response.candidates?.[0];
+      const candidateText = candidate?.content?.parts
+        ?.filter((part) => typeof part.text === "string")
+        .map((part) => part.text)
+        .join("\n")
+        .trim();
+      const text = (response.text || candidateText || "").trim();
       if (!text) {
+        const finishReason = String(candidate?.finishReason || "UNKNOWN");
+        const blockReason = String(response.promptFeedback?.blockReason || "NONE");
         return {
-          text: "I’m not able to give you a reliable answer from the information I have right now, so I’m going to have the support team take a look rather than guess.",
+          // Never fabricate a customer-facing sentence when the model returned no text.
+          // The event handler will escalate this diagnostic state without sending a canned reply.
+          text: null,
           toolCalls,
           reason: "empty_model_response",
+          diagnostic: {
+            finishReason,
+            blockReason,
+            candidateCount: response.candidates?.length || 0,
+            promptTokenCount: Number(response.usageMetadata?.promptTokenCount || 0),
+            candidatesTokenCount: Number(response.usageMetadata?.candidatesTokenCount || 0),
+            thoughtsTokenCount: Number(response.usageMetadata?.thoughtsTokenCount || 0),
+            totalTokenCount: Number(response.usageMetadata?.totalTokenCount || 0),
+          },
         };
       }
       return { text, toolCalls };
@@ -298,8 +356,10 @@ export async function generateSupportReply(input) {
     }
 
     if (staffEscalated) {
+      // The escalation tool has already notified staff. Do not send a hardcoded
+      // customer-facing message; only send text actually generated by the model.
       return {
-        text: "I’ve passed this ticket to the HelzerX Technologies support team. A staff member will review the details and continue helping you here.",
+        text: null,
         toolCalls,
         reason: "human_escalation",
       };
@@ -312,7 +372,8 @@ export async function generateSupportReply(input) {
   }
 
   return {
-    text: "I’m still checking this and don’t want to give you an inaccurate answer. I’ve handed it over to our support team so they can continue from here.",
+    // Tool-round guardrail is a diagnostic, not an AI-generated answer.
+    text: null,
     toolCalls,
     reason: "max_tool_rounds",
   };

@@ -2,6 +2,8 @@ import { config } from "#config/config";
 import { VPSBotClient } from "#integrations/vpsClient";
 import { HelzerXClient } from "#integrations/helzerxClient";
 import TicketUI from "#structures/classes/TicketUI";
+import { listHelzerXSites, readHelzerXWebsite, searchWeb } from "#ai/webIntelligence";
+import { getMinecraftPricing } from "#ai/pricing";
 
 const declaration = (name, description, properties = {}, required = []) => ({
   name,
@@ -10,6 +12,17 @@ const declaration = (name, description, properties = {}, required = []) => ({
 });
 
 export const toolDeclarations = [
+  declaration("search_web", "Search the live public web for current information. Requires TAVILY_API_KEY or BRAVE_SEARCH_API_KEY.", {
+    query: { type: "STRING", description: "Specific search query." },
+  }, ["query"]),
+  declaration("list_helzerx_websites", "List official HelzerX websites and their purposes.", {}),
+  declaration("read_helzerx_website", "Read a page from an official HelzerX HTTPS website to verify services, plans, and prices. Only official HelzerX domains are allowed.", {
+    url: { type: "STRING", description: "HTTPS URL on one of the official HelzerX domains." },
+  }, ["url"]),
+  declaration("get_minecraft_pricing", "Calculate the published HelzerX Cloud Minecraft plan price and processor-tier total. Use read_helzerx_website to verify live availability/pricing before promising it as current.", {
+    plan_id: { type: "STRING", description: "Plan ID such as HXC-S04. Optional; omit to list all plans." },
+    processor: { type: "STRING", description: "Optional processor tier: Ryzen 5, Ryzen 7, Xeon Gold, or AMD EPYC 9965." },
+  }),
   declaration("get_service_catalog", "List real HelzerX products and services currently available.", {}),
   declaration("get_service", "Read one customer service by service ID.", { service_id: { type: "STRING", description: "Service ID." } }, ["service_id"]),
   declaration("request_service_action", "Check ownership of a customer service and route service-changing requests to human support. This AI tool never executes service changes.", { service_id: { type: "STRING", description: "Customer service ID." }, action: { type: "STRING", description: "Requested operation to explain to staff." }, confirmed: { type: "BOOLEAN", description: "Whether the customer explicitly confirmed the request in this ticket." } }, ["service_id", "action"]),
@@ -84,6 +97,18 @@ export const toolDeclarations = [
   }, ["reason"]),
 ];
 
+export async function resolvePaidVpsPlans({ enabled, fetchPlans }) {
+  if (!enabled) {
+    throw new Error("Paid VPS plans are unavailable because the VPS plans integration is not configured. Do not infer or quote a price; escalate for a verified quote.");
+  }
+  const result = await fetchPlans();
+  const plans = Array.isArray(result?.plans) ? result.plans : [];
+  if (plans.length === 0) {
+    throw new Error("The VPS plans integration returned no paid plans. Do not infer or quote a price; escalate for a verified quote.");
+  }
+  return result;
+}
+
 const recordOwnerId = (record) => record?.user_id ?? record?.customer_id ?? record?.owner_id ?? record?.discord_user_id ?? null;
 
 // Fail closed: a missing owner field is not proof that the caller owns the resource.
@@ -132,6 +157,18 @@ export function createToolExecutor({ client, message, ticket, category }) {
   };
 
   return {
+    async search_web(args) {
+      return searchWeb(args.query);
+    },
+    async list_helzerx_websites() {
+      return { websites: listHelzerXSites() };
+    },
+    async read_helzerx_website(args) {
+      return readHelzerXWebsite(args.url);
+    },
+    async get_minecraft_pricing(args) {
+      return getMinecraftPricing(args);
+    },
     async get_service_catalog() {
       return business.catalog();
     },
@@ -204,8 +241,11 @@ export function createToolExecutor({ client, message, ticket, category }) {
       return client.inviteTracker.getUserInvites(message.guild, userId);
     },
     async get_vps_plans() {
-      if (vps.enabled) return vps.plans();
-      return { plans: config.invitePlans };
+      // Invite-reward VPS is not the paid VPS catalog.
+      return resolvePaidVpsPlans({
+        enabled: vps.enabled,
+        fetchPlans: () => vps.plans(),
+      });
     },
     async get_vps_nodes() {
       if (!vps.enabled) throw new Error("VPS bot integration is not configured.");

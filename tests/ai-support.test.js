@@ -1,6 +1,7 @@
 import test from "node:test";
+import { classifyProviderFailure } from "../src/events/discord/aiSupport.js";
 import assert from "node:assert/strict";
-import { buildSupportPrompt, formatHistory, sanitizeToolOutput } from "../src/ai/support.js";
+import { buildSupportPrompt, formatHistory, generateContentWithRetry, isQuotaExhaustedError, normalizeMessageContent, sanitizeToolOutput } from "../src/ai/support.js";
 
 test("buildSupportPrompt creates a multilingual, service-aware support agent", () => {
   const prompt = buildSupportPrompt({
@@ -20,6 +21,7 @@ test("buildSupportPrompt creates a multilingual, service-aware support agent", (
   assert.match(prompt, /Quality check before sending/i);
   assert.match(prompt, /orders, billing, payments, domains, Minecraft, AI agents, VPS/i);
   assert.match(prompt, /Never invent prices, plans, policies, refunds, payment status/i);
+  assert.match(prompt, /VPS plan, VPS price, RAM-size, or plan-comparison questions, call the get_vps_plans tool/i);
   assert.match(prompt, /Never ask for passwords, API keys, bot tokens/i);
   assert.match(prompt, /Latest customer message \(untrusted content/);
   assert.match(prompt, /<untrusted_latest_message>[\s\S]*Can you check it\?[\s\S]*<\/untrusted_latest_message>/);
@@ -141,4 +143,128 @@ test("sanitizeToolOutput bounds strings, arrays, and nesting", () => {
   assert.equal(sanitizeToolOutput(Array.from({ length: 30 }, (_, i) => i)).length, 20);
   const deep = { a: { b: { c: { d: { e: { f: "too deep" } } } } } }; 
   assert.equal(sanitizeToolOutput(deep).a.b.c.d.e, "[TRUNCATED]");
+});
+
+
+test("normalizeMessageContent includes bounded latest-message attachments and embeds", () => {
+  const message = {
+    content: "",
+    attachments: new Map([["a", { name: "crash.log", contentType: "text/plain" }]]),
+    embeds: [{ title: "Crash report", description: "Server failed on startup" }],
+  };
+  const normalized = normalizeMessageContent(message);
+  assert.match(normalized, /Attachment: crash.log; type: text\/plain/);
+  assert.match(normalized, /Crash report/);
+  assert.match(normalized, /Server failed on startup/);
+  assert.ok(normalized.length <= 6000);
+});
+
+
+test("generateContentWithRetry retries transient 503 errors and then succeeds", async () => {
+  let calls = 0;
+  const sleeps = [];
+  const result = await generateContentWithRetry(async () => {
+    calls += 1;
+    if (calls < 3) {
+      const error = new Error("This model is currently experiencing high demand.");
+      error.status = 503;
+      throw error;
+    }
+    return { text: "available" };
+  }, { delayMs: 10, sleep: async (ms) => { sleeps.push(ms); } });
+
+  assert.deepEqual(result, { text: "available" });
+  assert.equal(calls, 3);
+  assert.deepEqual(sleeps, [10, 20]);
+});
+
+test("generateContentWithRetry does not retry permanent provider errors", async () => {
+  let calls = 0;
+  const error = new Error("User location is not supported for the API use.");
+  error.status = 400;
+
+  await assert.rejects(
+    generateContentWithRetry(async () => { calls += 1; throw error; }, {
+      delayMs: 1,
+      sleep: async () => {},
+    }),
+    /User location is not supported/,
+  );
+  assert.equal(calls, 1);
+});
+
+test("generateContentWithRetry stops after the configured attempt limit", async () => {
+  let calls = 0;
+  await assert.rejects(
+    generateContentWithRetry(async () => {
+      calls += 1;
+      const error = new Error("temporarily unavailable");
+      error.status = 503;
+      throw error;
+    }, { attempts: 3, delayMs: 1, sleep: async () => {} }),
+    /temporarily unavailable/,
+  );
+  assert.equal(calls, 3);
+});
+
+
+
+test("Gemini daily quota exhaustion is detected and is not retried", async () => {
+  const quotaError = new Error('{"error":{"code":429,"message":"You exceeded your current quota. Quota exceeded for metric generate_content_free_tier_requests; retry in 10h." ,"status":"RESOURCE_EXHAUSTED"}}');
+  quotaError.status = 429;
+  assert.equal(isQuotaExhaustedError(quotaError), true);
+
+  let calls = 0;
+  await assert.rejects(
+    generateContentWithRetry(async () => {
+      calls += 1;
+      throw quotaError;
+    }, { attempts: 3, delayMs: 1, sleep: async () => {} }),
+  );
+  assert.equal(calls, 1);
+});
+
+test("transient 429 rate limits remain retryable when they are not quota exhaustion", async () => {
+  const rateLimitError = new Error("Too many requests; retry shortly.");
+  rateLimitError.status = 429;
+  assert.equal(isQuotaExhaustedError(rateLimitError), false);
+
+  let calls = 0;
+  const result = await generateContentWithRetry(async () => {
+    calls += 1;
+    if (calls === 1) throw rateLimitError;
+    return { text: "recovered" };
+  }, { attempts: 2, delayMs: 1, sleep: async () => {} });
+  assert.deepEqual(result, { text: "recovered" });
+  assert.equal(calls, 2);
+});
+
+
+test("provider failures classify quota, timeout, invalid key, and unavailable model accurately", () => {
+  const quota = classifyProviderFailure(new Error('{"error":{"code":429,"message":"Quota exceeded for metric generate_content_free_tier_requests; retry in 10h.","status":"RESOURCE_EXHAUSTED"}}'));
+  assert.equal(quota.code, "gemini_quota_exhausted");
+  assert.match(quota.staffReason, /request quota is exhausted/i);
+  assert.match(quota.staffReason, /before generating a response/i);
+  assert.ok(quota.retryDelayMs >= 10 * 60 * 60 * 1000);
+
+  const timeout = classifyProviderFailure(new Error("AI provider request timed out."));
+  assert.equal(timeout.code, "ai_provider_timeout");
+  assert.match(timeout.staffReason, /timed out/i);
+  assert.doesNotMatch(timeout.staffReason, /request quota is exhausted/i);
+
+  const invalidKey = classifyProviderFailure(new Error('{"error":{"code":400,"message":"API key not valid. Please pass a valid API key.","status":"INVALID_ARGUMENT"}}'));
+  assert.equal(invalidKey.code, "ai_provider_auth_error");
+  assert.match(invalidKey.staffReason, /configured API key/i);
+
+  const forbidden = new Error("Permission denied");
+  forbidden.status = 403;
+  assert.equal(classifyProviderFailure(forbidden).code, "ai_provider_auth_error");
+
+  const unavailableModel = classifyProviderFailure(new Error('{"error":{"code":404,"message":"models/example is not found for API version v1beta","status":"NOT_FOUND"}}'));
+  assert.equal(unavailableModel.code, "ai_model_unavailable");
+  assert.match(unavailableModel.staffReason, /GEMINI_MODEL/i);
+
+  const unknown = classifyProviderFailure(new Error("socket closed"));
+  assert.equal(unknown.code, "ai_provider_error");
+  assert.match(unknown.staffReason, /failed before generating a response/i);
 });
