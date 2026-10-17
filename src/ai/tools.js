@@ -3,6 +3,7 @@ import { VPSBotClient } from "#integrations/vpsClient";
 import { HelzerXClient } from "#integrations/helzerxClient";
 import TicketUI from "#structures/classes/TicketUI";
 import { listHelzerXSites, readHelzerXWebsite, searchWeb } from "#ai/webIntelligence";
+import { getMinecraftPricing } from "#ai/pricing";
 
 const declaration = (name, description, properties = {}, required = []) => ({
   name,
@@ -18,6 +19,10 @@ export const toolDeclarations = [
   declaration("read_helzerx_website", "Read a page from an official HelzerX HTTPS website to verify services, plans, and prices. Only official HelzerX domains are allowed.", {
     url: { type: "STRING", description: "HTTPS URL on one of the official HelzerX domains." },
   }, ["url"]),
+  declaration("get_minecraft_pricing", "Calculate the published HelzerX Cloud Minecraft plan price and processor-tier total. Use read_helzerx_website to verify live availability/pricing before promising it as current.", {
+    plan_id: { type: "STRING", description: "Plan ID such as HXC-S04. Optional; omit to list all plans." },
+    processor: { type: "STRING", description: "Optional processor tier: Ryzen 5, Ryzen 7, Xeon Gold, or AMD EPYC 9965." },
+  }),
   declaration("get_service_catalog", "List real HelzerX products and services currently available.", {}),
   declaration("get_service", "Read one customer service by service ID.", { service_id: { type: "STRING", description: "Service ID." } }, ["service_id"]),
   declaration("request_service_action", "Check ownership of a customer service and route service-changing requests to human support. This AI tool never executes service changes.", { service_id: { type: "STRING", description: "Customer service ID." }, action: { type: "STRING", description: "Requested operation to explain to staff." }, confirmed: { type: "BOOLEAN", description: "Whether the customer explicitly confirmed the request in this ticket." } }, ["service_id", "action"]),
@@ -148,6 +153,9 @@ export function createToolExecutor({ client, message, ticket, category }) {
     },
     async read_helzerx_website(args) {
       return readHelzerXWebsite(args.url);
+    },
+    async get_minecraft_pricing(args) {
+      return getMinecraftPricing(args);
     },
     async get_service_catalog() {
       return business.catalog();
