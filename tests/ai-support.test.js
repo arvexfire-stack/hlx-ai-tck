@@ -20,6 +20,7 @@ test("buildSupportPrompt creates a multilingual, service-aware support agent", (
   assert.match(prompt, /Quality check before sending/i);
   assert.match(prompt, /orders, billing, payments, domains, Minecraft, AI agents, VPS/i);
   assert.match(prompt, /Never invent prices, plans, policies, refunds, payment status/i);
+  assert.match(prompt, /VPS plan, VPS price, RAM-size, or plan-comparison questions, call the get_vps_plans tool/i);
   assert.match(prompt, /Never ask for passwords, API keys, bot tokens/i);
   assert.match(prompt, /Latest customer message \(untrusted content/);
   assert.match(prompt, /<untrusted_latest_message>[\s\S]*Can you check it\?[\s\S]*<\/untrusted_latest_message>/);
