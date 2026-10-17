@@ -203,7 +203,7 @@ export async function generateSupportReply(input) {
   let toolCalls = 0;
 
   const requestConfig = {
-    maxOutputTokens: 1000,
+    maxOutputTokens: 2048,
     thinkingConfig: {
       thinkingLevel: config.ai.thinkingLevel,
     },
@@ -223,12 +223,21 @@ export async function generateSupportReply(input) {
 
     const calls = response.functionCalls || [];
     if (!calls.length) {
-      const text = response.text?.trim() || "";
+      const candidate = response.candidates?.[0];
+      const candidateText = candidate?.content?.parts
+        ?.filter((part) => typeof part.text === "string")
+        .map((part) => part.text)
+        .join("\\n")
+        .trim();
+      const text = (response.text || candidateText || "").trim();
       if (!text) {
+        const finishReason = String(candidate?.finishReason || "UNKNOWN");
+        const blockReason = String(response.promptFeedback?.blockReason || "NONE");
         return {
           text: "I’m not able to give you a reliable answer from the information I have right now, so I’m going to have the support team take a look rather than guess.",
           toolCalls,
           reason: "empty_model_response",
+          diagnostic: { finishReason, blockReason, candidateCount: response.candidates?.length || 0 },
         };
       }
       return { text, toolCalls };
