@@ -19,7 +19,17 @@ const withTimeout = async (promise, timeoutMs) => {
   }
 };
 
+// A daily/project quota exhaustion will not recover after a short retry. Retrying it
+// wastes requests and delays the fallback; keep retries for genuinely transient failures.
+export const isQuotaExhaustedError = (error) => {
+  const message = String(error?.message || error?.error?.message || "");
+  const status = Number(error?.status || error?.code || error?.error?.code || 0);
+  return status === 429 && /quota|resource_exhausted|rate.?limit/i.test(message)
+    || /RESOURCE_EXHAUSTED/i.test(message) && /quota exceeded|free.?tier|per.?day|retry in \d/i.test(message);
+};
+
 const isRetryableProviderError = (error) => {
+  if (isQuotaExhaustedError(error)) return false;
   const status = Number(error?.status || error?.code || error?.error?.code || 0);
   const message = String(error?.message || "");
   return [408, 429, 500, 502, 503, 504].includes(status)
