@@ -34,22 +34,37 @@ export default {
   async execute({ eventArgs, client }) {
     const [message] = eventArgs;
     if (!message.guild || message.author.bot || !message.channel?.isTextBased()) return;
-    if (!config.ai.enabled || !config.ai.apiKey) return;
+    if (!config.ai.enabled || !config.ai.apiKey) {
+      logger.warn("AI Support", "Skipped message: AI is disabled or Gemini API key is not configured.");
+      return;
+    }
 
     const guildConfig = await client.db.getGuild(message.guild.id);
-    if (guildConfig?.aiSupport?.enabled === false) return;
+    if (guildConfig?.aiSupport?.enabled === false) {
+      logger.info("AI Support", "Skipped ticket message: guild AI support is disabled.");
+      return;
+    }
 
     const ticket = await client.db.getTicketByChannel(message.channel.id);
     if (!ticket || ticket.status !== "open") return;
-    if (ticket.aiStats?.humanTakeover) return;
+    if (ticket.aiStats?.humanTakeover) {
+      logger.info("AI Support", "Skipped ticket " + ticket.ticketId + ": human takeover is active.");
+      return;
+    }
 
     const panel = await client.db.getPanel(ticket.panelId);
     const category = panel?.categories?.find((item) => item.categoryId === ticket.categoryId);
-    if (!category || category.settings?.aiEnabled === false) return;
+    if (!category || category.settings?.aiEnabled === false) {
+      logger.info("AI Support", "Skipped ticket " + ticket.ticketId + ": category missing or AI disabled.");
+      return;
+    }
 
     const now = Date.now();
     const last = cooldowns.get(message.channel.id) || 0;
-    if (now - last < config.ai.cooldownMs) return;
+    if (now - last < config.ai.cooldownMs) {
+      logger.info("AI Support", "Skipped ticket " + ticket.ticketId + ": cooldown active.");
+      return;
+    }
 
     const recent = await message.channel.messages.fetch({
       limit: Math.min(config.ai.historyLimit, 25),
@@ -63,9 +78,13 @@ export default {
         isStaffMessage(item, category) &&
         now - item.createdTimestamp < config.ai.staffSilenceMs,
     );
-    if (staffRecentlyActive) return;
+    if (staffRecentlyActive) {
+      logger.info("AI Support", "Skipped ticket " + ticket.ticketId + ": support staff recently replied.");
+      return;
+    }
 
     cooldowns.set(message.channel.id, now);
+    logger.info("AI Support", "Processing customer message for ticket " + ticket.ticketId + " in category " + category.name + ".");
     await message.channel.sendTyping();
 
     try {
@@ -88,6 +107,7 @@ export default {
       if (latestTicket.aiStats?.humanTakeover && result.reason !== "human_escalation") return;
 
       const text = result.text?.trim();
+      logger.info("AI Support", "Completed ticket " + ticket.ticketId + ": hasText=" + Boolean(text) + ", toolCalls=" + result.toolCalls + ", reason=" + (result.reason || "none") + ".");
 
       if (!text) {
         cooldowns.delete(message.channel.id);
