@@ -3,7 +3,9 @@ import { generateSupportReply, formatHistory, normalizeMessageContent } from "#a
 import TicketUI from "#structures/classes/TicketUI";
 import { logger } from "#utils/logger";
 
-const cooldowns = new Map();
+// Prevent duplicate Discord event delivery without dropping legitimate follow-up messages.
+const seenMessageIds = new Set();
+const messageQueues = new Map();
 
 const isStaffMessage = (message, category) =>
   category?.supportRoles?.some((roleId) => message.member?.roles?.cache?.has(roleId)) || false;
@@ -34,6 +36,27 @@ export default {
   async execute({ eventArgs, client }) {
     const [message] = eventArgs;
     if (!message.guild || message.author.bot || !message.channel?.isTextBased()) return;
+    if (seenMessageIds.has(message.id)) return;
+    seenMessageIds.add(message.id);
+    if (seenMessageIds.size > 5000) {
+      const oldest = seenMessageIds.values().next().value;
+      if (oldest) seenMessageIds.delete(oldest);
+    }
+
+    // Serialize customer messages per ticket channel. A fast follow-up must wait,
+    // not be discarded by a cooldown while the previous message is being handled.
+    const channelId = message.channel.id;
+    const previousTask = messageQueues.get(channelId) || Promise.resolve();
+    const currentTask = previousTask.catch(() => {}).then(() => this.processMessage({ message, client }));
+    messageQueues.set(channelId, currentTask);
+    try {
+      await currentTask;
+    } finally {
+      if (messageQueues.get(channelId) === currentTask) messageQueues.delete(channelId);
+    }
+  },
+
+  async processMessage({ message, client }) {
     if (!config.ai.enabled || !config.ai.apiKey) {
       logger.warn("AI Support", "Skipped message: AI is disabled or Gemini API key is not configured.");
       return;
@@ -60,11 +83,6 @@ export default {
     }
 
     const now = Date.now();
-    const last = cooldowns.get(message.channel.id) || 0;
-    if (now - last < config.ai.cooldownMs) {
-      logger.info("AI Support", "Skipped ticket " + ticket.ticketId + ": cooldown active.");
-      return;
-    }
 
     const recent = await message.channel.messages.fetch({
       limit: Math.min(config.ai.historyLimit, 25),
@@ -83,7 +101,6 @@ export default {
       return;
     }
 
-    cooldowns.set(message.channel.id, now);
     logger.info("AI Support", "Processing customer message for ticket " + ticket.ticketId + " in category " + category.name + ".");
     await message.channel.sendTyping();
 
@@ -110,7 +127,6 @@ export default {
       logger.info("AI Support", "Completed ticket " + ticket.ticketId + ": hasText=" + Boolean(text) + ", toolCalls=" + result.toolCalls + ", reason=" + (result.reason || "none") + ".");
 
       if (!text) {
-        cooldowns.delete(message.channel.id);
         await client.db.updateTicket(ticket.ticketId, {
           "aiStats.escalated": true,
           "aiStats.humanTakeover": true,
@@ -178,7 +194,6 @@ export default {
       }
     } catch (error) {
       logger.error("AI Support", "Failed to process ticket " + ticket.ticketId, error);
-      cooldowns.delete(message.channel.id);
 
       try {
         await message.channel.send({
