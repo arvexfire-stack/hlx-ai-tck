@@ -19,6 +19,31 @@ const withTimeout = async (promise, timeoutMs) => {
   }
 };
 
+const isRetryableProviderError = (error) => {
+  const status = Number(error?.status || error?.code || error?.error?.code || 0);
+  const message = String(error?.message || "");
+  return [408, 429, 500, 502, 503, 504].includes(status)
+    || /\b(RESOURCE_EXHAUSTED|UNAVAILABLE|INTERNAL|DEADLINE_EXCEEDED|ECONNRESET|ETIMEDOUT|EAI_AGAIN)\b/i.test(message);
+};
+
+export async function generateContentWithRetry(generate, {
+  attempts = 3,
+  delayMs = 800,
+  sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+} = {}) {
+  let lastError;
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    try {
+      return await generate();
+    } catch (error) {
+      lastError = error;
+      if (attempt === attempts - 1 || !isRetryableProviderError(error)) throw error;
+      await sleep(delayMs * (2 ** attempt));
+    }
+  }
+  throw lastError;
+}
+
 const SENSITIVE_FIELD = /password|passphrase|secret|token|api[_-]?key|private[_-]?key|authorization|cookie|session|cvv|card[_-]?number|client[_-]?secret/i;
 
 export function sanitizeToolOutput(value, depth = 0) {
@@ -212,13 +237,16 @@ export async function generateSupportReply(input) {
   };
 
   for (let round = 0; round < config.ai.maxToolRounds; round += 1) {
-    const response = await withTimeout(
-      client.models.generateContent({
-        model: input.model || config.ai.model,
-        contents,
-        config: requestConfig,
-      }),
-      config.ai.providerTimeoutMs,
+    const response = await generateContentWithRetry(
+      () => withTimeout(
+        client.models.generateContent({
+          model: input.model || config.ai.model,
+          contents,
+          config: requestConfig,
+        }),
+        config.ai.providerTimeoutMs,
+      ),
+      { attempts: 3, delayMs: 800 },
     );
 
     const calls = response.functionCalls || [];
