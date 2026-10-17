@@ -240,17 +240,29 @@ test("transient 429 rate limits remain retryable when they are not quota exhaust
 });
 
 
-test("provider failure escalation reasons accurately classify quota exhaustion and timeout", () => {
+test("provider failures classify quota, timeout, invalid key, and unavailable model accurately", () => {
   const quota = classifyProviderFailure(new Error('{"error":{"code":429,"message":"Quota exceeded for metric generate_content_free_tier_requests; retry in 10h.","status":"RESOURCE_EXHAUSTED"}}'));
   assert.equal(quota.code, "gemini_quota_exhausted");
-  assert.match(quota.staffReason, /daily free-tier request quota is exhausted/i);
+  assert.match(quota.staffReason, /request quota is exhausted/i);
   assert.match(quota.staffReason, /before generating a response/i);
   assert.ok(quota.retryDelayMs >= 10 * 60 * 60 * 1000);
 
   const timeout = classifyProviderFailure(new Error("AI provider request timed out."));
   assert.equal(timeout.code, "ai_provider_timeout");
-  assert.match(timeout.staffReason, /timed out before producing a response/i);
-  assert.doesNotMatch(timeout.staffReason, /daily free-tier request quota/i);
+  assert.match(timeout.staffReason, /timed out/i);
+  assert.doesNotMatch(timeout.staffReason, /request quota is exhausted/i);
+
+  const invalidKey = classifyProviderFailure(new Error('{"error":{"code":400,"message":"API key not valid. Please pass a valid API key.","status":"INVALID_ARGUMENT"}}'));
+  assert.equal(invalidKey.code, "ai_provider_auth_error");
+  assert.match(invalidKey.staffReason, /configured API key/i);
+
+  const forbidden = new Error("Permission denied");
+  forbidden.status = 403;
+  assert.equal(classifyProviderFailure(forbidden).code, "ai_provider_auth_error");
+
+  const unavailableModel = classifyProviderFailure(new Error('{"error":{"code":404,"message":"models/example is not found for API version v1beta","status":"NOT_FOUND"}}'));
+  assert.equal(unavailableModel.code, "ai_model_unavailable");
+  assert.match(unavailableModel.staffReason, /GEMINI_MODEL/i);
 
   const unknown = classifyProviderFailure(new Error("socket closed"));
   assert.equal(unknown.code, "ai_provider_error");
