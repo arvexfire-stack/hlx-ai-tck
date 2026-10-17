@@ -73,7 +73,7 @@ const categoryPlaybook = (categoryName = "", categoryDescription = "") => {
   return "General support playbook: first identify what the customer is trying to accomplish, then use the minimum necessary tool or question to move the issue forward.";
 };
 
-function normalizeMessageContent(message) {
+export function normalizeMessageContent(message) {
   const text = String(message.content || "").trim();
   const attachments = [...(message.attachments?.values?.() || [])]
     .slice(0, 5)
