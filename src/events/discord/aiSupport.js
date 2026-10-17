@@ -114,6 +114,23 @@ export default {
       return;
     }
 
+    // Greetings do not need a model call. This keeps support welcoming even when the
+    // Gemini free-tier quota is exhausted and avoids spending scarce requests on "hi".
+    const latestMessageText = normalizeMessageContent(message).trim();
+    const isSimpleGreeting = /^(?:hi|hey|hello|hiya|yo|good morning|good afternoon|good evening)[!. ,?]*$/i.test(latestMessageText);
+    if (isSimpleGreeting) {
+      await message.channel.send({
+        content: "Hey! Welcome to HelzerX Technologies support. I can help with Cloud plans, free hosting, game or bot hosting, Studio, billing, and technical issues. Tell me what you need and I’ll point you in the right direction.",
+        allowedMentions: { parse: [] },
+      });
+      await client.db.updateTicket(ticket.ticketId, {
+        "aiStats.messages": (ticket.aiStats?.messages || 0) + 1,
+        "aiStats.lastInteractionAt": new Date(),
+        "aiStats.lastError": null,
+      });
+      return;
+    }
+
     logger.info("AI Support", "Processing customer message for ticket " + ticket.ticketId + " in category " + category.name + ".");
     await message.channel.sendTyping();
 
