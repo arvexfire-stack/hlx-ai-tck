@@ -26,6 +26,23 @@ const isStaffMessage = (message, category) => {
 const FALLBACK_REPLY =
   "I’m having trouble checking that reliably right now. I don’t want to guess, so I’ve handed this over to the support team.";
 
+const QUOTA_ERROR_MARKER = "Gemini API quota exhausted";
+let quotaCooldownUntil = 0;
+
+function quotaRetryDelayMs(error) {
+  const message = String(error?.message || "");
+  const retrySeconds = message.match(/retry in\\s+(?:(\\d+)h)?(?:(\\d+)m)?(?:(\\d+(?:\\.\\d+)?)s)?/i);
+  if (retrySeconds) {
+    const hours = Number(retrySeconds[1] || 0);
+    const minutes = Number(retrySeconds[2] || 0);
+    const seconds = Number(retrySeconds[3] || 0);
+    const parsed = ((hours * 60 + minutes) * 60 + seconds) * 1000;
+    if (parsed > 0) return parsed + 30_000;
+  }
+  // A conservative fallback prevents repeatedly hitting a known exhausted quota.
+  return 60 * 60 * 1000;
+}
+
 async function notifyRuntimeEscalation({ message, ticket, category, reason }) {
   const roles = category?.supportRoles || [];
   const priority = "normal";
@@ -131,6 +148,32 @@ export default {
       return;
     }
 
+    // Open a local circuit breaker after a confirmed daily quota error. Avoid one
+    // doomed API request per customer message until the provider says to retry.
+    if (Date.now() < quotaCooldownUntil) {
+      await message.channel.send({
+        content: "The AI provider’s request limit is temporarily exhausted, so I can’t verify this automatically yet. Your message is still in the ticket; support staff can help, and automated replies will resume after the limit resets.",
+        allowedMentions: { parse: [] },
+      });
+      const alreadyNotified = ticket.aiStats?.lastError === QUOTA_ERROR_MARKER;
+      await client.db.updateTicket(ticket.ticketId, {
+        "aiStats.escalated": true,
+        "aiStats.priority": "normal",
+        "aiStats.intent": "ai_quota_exhausted",
+        "aiStats.lastError": QUOTA_ERROR_MARKER,
+        "aiStats.lastInteractionAt": new Date(),
+      });
+      if (!alreadyNotified) {
+        await notifyRuntimeEscalation({
+          message,
+          ticket,
+          category,
+          reason: "The Gemini API project has exhausted its current request quota. AI requests are temporarily paused to avoid repeated failures; automated handling can resume when quota becomes available.",
+        });
+      }
+      return;
+    }
+
     logger.info("AI Support", "Processing customer message for ticket " + ticket.ticketId + " in category " + category.name + ".");
     await message.channel.sendTyping();
 
@@ -226,7 +269,8 @@ export default {
       }
     } catch (error) {
       const quotaExhausted = isQuotaExhaustedError(error);
-      logger.error("AI Support", "Failed to process ticket " + ticket.ticketId + (quotaExhausted ? ": Gemini API quota exhausted; not retrying this request." : ""), error);
+      if (quotaExhausted) quotaCooldownUntil = Math.max(quotaCooldownUntil, Date.now() + quotaRetryDelayMs(error));
+      logger.error("AI Support", "Failed to process ticket " + ticket.ticketId + (quotaExhausted ? ": Gemini API quota exhausted; circuit breaker enabled." : ""), error);
 
       try {
         await message.channel.send({
@@ -243,7 +287,7 @@ export default {
           "aiStats.escalated": true,
           "aiStats.priority": "normal",
           "aiStats.intent": "ai_runtime_failure",
-          "aiStats.lastError": (error?.name || "Error") + ": AI runtime failure; see restricted service logs for details.",
+          "aiStats.lastError": quotaExhausted ? QUOTA_ERROR_MARKER : (error?.name || "Error") + ": AI runtime failure; see restricted service logs for details.",
           "aiStats.lastInteractionAt": new Date(),
         });
 
