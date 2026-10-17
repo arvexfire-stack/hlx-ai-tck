@@ -229,8 +229,17 @@ export function createToolExecutor({ client, message, ticket, category }) {
       return client.inviteTracker.getUserInvites(message.guild, userId);
     },
     async get_vps_plans() {
-      if (vps.enabled) return vps.plans();
-      return { plans: config.invitePlans };
+      // Invite-reward VPS is not the paid VPS catalog. Never substitute it for
+      // paid pricing when the VPS bot integration is missing or unavailable.
+      if (!vps.enabled) {
+        throw new Error("Paid VPS plans are unavailable because the VPS plans integration is not configured. Do not infer or quote a price; escalate for a verified quote.");
+      }
+      const result = await vps.plans();
+      const plans = Array.isArray(result?.plans) ? result.plans : [];
+      if (plans.length === 0) {
+        throw new Error("The VPS plans integration returned no paid plans. Do not infer or quote a price; escalate for a verified quote.");
+      }
+      return result;
     },
     async get_vps_nodes() {
       if (!vps.enabled) throw new Error("VPS bot integration is not configured.");
