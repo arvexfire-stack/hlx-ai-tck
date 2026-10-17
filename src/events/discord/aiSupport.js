@@ -29,7 +29,7 @@ const FALLBACK_REPLY =
 const QUOTA_ERROR_MARKER = "Gemini API quota exhausted";
 let quotaCooldownUntil = 0;
 
-function classifyProviderFailure(error) {
+export function classifyProviderFailure(error) {
   if (isQuotaExhaustedError(error)) {
     return {
       code: "gemini_quota_exhausted",
