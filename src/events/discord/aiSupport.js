@@ -29,6 +29,34 @@ const FALLBACK_REPLY =
 const QUOTA_ERROR_MARKER = "Gemini API quota exhausted";
 let quotaCooldownUntil = 0;
 
+function classifyProviderFailure(error) {
+  if (isQuotaExhaustedError(error)) {
+    return {
+      code: "gemini_quota_exhausted",
+      customerMessage: "Gemini has reached this project's daily request quota. I can't verify the requested information until the quota becomes available again.",
+      staffReason: "Gemini API daily free-tier request quota is exhausted (HTTP 429 / RESOURCE_EXHAUSTED). No AI-generated diagnosis is available because the model request was rejected before generating a response.",
+      retryDelayMs: quotaRetryDelayMs(error),
+    };
+  }
+
+  const message = String(error?.message || "");
+  if (/timed out|timeout/i.test(message)) {
+    return {
+      code: "ai_provider_timeout",
+      customerMessage: "The AI provider did not respond before the request timed out. I couldn't verify the answer, so please continue with support staff while the service recovers.",
+      staffReason: "The AI provider request timed out before producing a response. This is a provider/network timeout, not an AI-generated diagnosis; check provider latency and connectivity.",
+      retryDelayMs: 60_000,
+    };
+  }
+
+  return {
+    code: "ai_provider_error",
+    customerMessage: "The AI provider returned an error before I could verify the answer. I don't want to guess, so support staff have been notified.",
+    staffReason: "The AI provider request failed before generating a response. Review the restricted service logs for the underlying provider error.",
+    retryDelayMs: 60_000,
+  };
+}
+
 function quotaRetryDelayMs(error) {
   const message = String(error?.message || "");
   const retrySeconds = message.match(/retry in\s+(?:(\d+)h)?(?:(\d+)m)?(?:(\d+(?:\.\d+)?)s)?/i);
@@ -268,26 +296,25 @@ export default {
         logger.warn("AI Support", "Guardrail used for ticket " + ticket.ticketId + ": " + result.reason + diagnostic);
       }
     } catch (error) {
-      const quotaExhausted = isQuotaExhaustedError(error);
-      if (quotaExhausted) quotaCooldownUntil = Math.max(quotaCooldownUntil, Date.now() + quotaRetryDelayMs(error));
-      logger.error("AI Support", "Failed to process ticket " + ticket.ticketId + (quotaExhausted ? ": Gemini API quota exhausted; circuit breaker enabled." : ""), error);
+      const failure = classifyProviderFailure(error);
+      const quotaExhausted = failure.code === "gemini_quota_exhausted";
+      quotaCooldownUntil = Math.max(quotaCooldownUntil, Date.now() + failure.retryDelayMs);
+      logger.error("AI Support", "Failed to process ticket " + ticket.ticketId + ": " + failure.code + ". See provider error details below.", error);
 
       try {
         await message.channel.send({
-          content: quotaExhausted
-            ? "I can’t run the AI check right now because the AI provider has reached its request limit. I’ve notified the support team; please continue here and a staff member can help. This ticket has not been permanently handed over, so automated replies can resume when the provider quota is available."
-            : FALLBACK_REPLY,
+          content: failure.customerMessage,
           allowedMentions: { parse: [] },
         });
 
         // A provider/API outage must not permanently disable AI for this ticket.
-        // Notify staff and record the failure, but reserve humanTakeover for an
-        // explicit staff claim or deliberate AI escalation.
+        // Keep a precise machine-classified reason; do not imply the model wrote
+        // a diagnosis when the model failed before generating any response.
         await client.db.updateTicket(ticket.ticketId, {
           "aiStats.escalated": true,
           "aiStats.priority": "normal",
-          "aiStats.intent": "ai_runtime_failure",
-          "aiStats.lastError": quotaExhausted ? QUOTA_ERROR_MARKER : (error?.name || "Error") + ": AI runtime failure; see restricted service logs for details.",
+          "aiStats.intent": failure.code,
+          "aiStats.lastError": quotaExhausted ? QUOTA_ERROR_MARKER : failure.code + ": " + (error?.name || "Error"),
           "aiStats.lastInteractionAt": new Date(),
         });
 
@@ -295,9 +322,7 @@ export default {
           message,
           ticket,
           category,
-          reason: quotaExhausted
-            ? "The Gemini API project has exhausted its current request quota. No rapid retries will be made; AI handling can resume when quota becomes available."
-            : "The AI provider failed while processing this message. Staff have been notified; the AI will remain available for a later customer message.",
+          reason: failure.staffReason,
         });
       } catch (fallbackError) {
         logger.error("AI Support", "Failed to send AI fallback for ticket " + ticket.ticketId, fallbackError);
