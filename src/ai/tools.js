@@ -2,6 +2,7 @@ import { config } from "#config/config";
 import { VPSBotClient } from "#integrations/vpsClient";
 import { HelzerXClient } from "#integrations/helzerxClient";
 import TicketUI from "#structures/classes/TicketUI";
+import { listHelzerXSites, readHelzerXWebsite, searchWeb } from "#ai/webIntelligence";
 
 const declaration = (name, description, properties = {}, required = []) => ({
   name,
@@ -10,6 +11,13 @@ const declaration = (name, description, properties = {}, required = []) => ({
 });
 
 export const toolDeclarations = [
+  declaration("search_web", "Search the live public web for current information. Requires TAVILY_API_KEY or BRAVE_SEARCH_API_KEY.", {
+    query: { type: "STRING", description: "Specific search query." },
+  }, ["query"]),
+  declaration("list_helzerx_websites", "List official HelzerX websites and their purposes.", {}),
+  declaration("read_helzerx_website", "Read a page from an official HelzerX HTTPS website to verify services, plans, and prices. Only official HelzerX domains are allowed.", {
+    url: { type: "STRING", description: "HTTPS URL on one of the official HelzerX domains." },
+  }, ["url"]),
   declaration("get_service_catalog", "List real HelzerX products and services currently available.", {}),
   declaration("get_service", "Read one customer service by service ID.", { service_id: { type: "STRING", description: "Service ID." } }, ["service_id"]),
   declaration("request_service_action", "Check ownership of a customer service and route service-changing requests to human support. This AI tool never executes service changes.", { service_id: { type: "STRING", description: "Customer service ID." }, action: { type: "STRING", description: "Requested operation to explain to staff." }, confirmed: { type: "BOOLEAN", description: "Whether the customer explicitly confirmed the request in this ticket." } }, ["service_id", "action"]),
@@ -132,6 +140,15 @@ export function createToolExecutor({ client, message, ticket, category }) {
   };
 
   return {
+    async search_web(args) {
+      return searchWeb(args.query);
+    },
+    async list_helzerx_websites() {
+      return { websites: listHelzerXSites() };
+    },
+    async read_helzerx_website(args) {
+      return readHelzerXWebsite(args.url);
+    },
     async get_service_catalog() {
       return business.catalog();
     },
