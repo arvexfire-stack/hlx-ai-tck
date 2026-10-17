@@ -207,6 +207,18 @@ export default {
       const text = result.text?.trim();
       logger.info("AI Support", "Completed ticket " + ticket.ticketId + ": hasText=" + Boolean(text) + ", toolCalls=" + result.toolCalls + ", reason=" + (result.reason || "none") + ".");
 
+      if (result.reason === "human_escalation") {
+        // The escalation tool already notified staff and enabled takeover. Do not
+        // send a canned customer message or overwrite the human-escalation state.
+        await client.db.updateTicket(ticket.ticketId, {
+          "aiStats.messages": (ticket.aiStats?.messages || 0) + 1,
+          "aiStats.toolCalls": (ticket.aiStats?.toolCalls || 0) + result.toolCalls,
+          "aiStats.lastInteractionAt": new Date(),
+          "aiStats.lastError": null,
+        });
+        return;
+      }
+
       if (!text) {
         // An empty provider response is a recoverable AI failure, not a staff claim.
         // Keep the ticket eligible for a later customer message after notifying staff.
