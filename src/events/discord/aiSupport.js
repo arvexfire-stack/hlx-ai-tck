@@ -126,12 +126,17 @@ export default {
         "aiStats.lastError": null,
       });
 
-      if (result.reason === "max_tool_rounds") {
+      if (result.reason === "max_tool_rounds" || result.reason === "empty_model_response") {
+        const emptyResponse = result.reason === "empty_model_response";
+        const diagnostic = result.diagnostic || {};
         await client.db.updateTicket(ticket.ticketId, {
           "aiStats.escalated": true,
           "aiStats.humanTakeover": true,
           "aiStats.priority": "normal",
-          "aiStats.intent": "ai_tool_limit",
+          "aiStats.intent": emptyResponse ? "ai_no_response" : "ai_tool_limit",
+          "aiStats.lastError": emptyResponse
+            ? "Gemini returned no customer-facing text (finishReason=" + diagnostic.finishReason + ", blockReason=" + diagnostic.blockReason + ")."
+            : null,
           "aiStats.lastActionAt": new Date(),
         });
 
@@ -139,12 +144,17 @@ export default {
           message,
           ticket,
           category,
-          reason: "The AI needed more tool checks than the configured safety limit, so human support should continue the ticket.",
+          reason: emptyResponse
+            ? "The AI provider returned no customer-facing text. Human support should continue this ticket."
+            : "The AI needed more tool checks than the configured safety limit, so human support should continue the ticket.",
         });
       }
 
       if (result.reason && result.reason !== "ai_disabled") {
-        logger.warn("AI Support", "Guardrail used for ticket " + ticket.ticketId + ": " + result.reason);
+        const diagnostic = result.diagnostic
+          ? " (finishReason=" + result.diagnostic.finishReason + ", blockReason=" + result.diagnostic.blockReason + ", candidates=" + result.diagnostic.candidateCount + ")"
+          : "";
+        logger.warn("AI Support", "Guardrail used for ticket " + ticket.ticketId + ": " + result.reason + diagnostic);
       }
     } catch (error) {
       logger.error("AI Support", "Failed to process ticket " + ticket.ticketId, error);
