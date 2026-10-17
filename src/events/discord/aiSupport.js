@@ -201,9 +201,11 @@ export default {
           allowedMentions: { parse: [] },
         });
 
+        // A provider/API outage must not permanently disable AI for this ticket.
+        // Notify staff and record the failure, but reserve humanTakeover for an
+        // explicit staff claim or deliberate AI escalation.
         await client.db.updateTicket(ticket.ticketId, {
           "aiStats.escalated": true,
-          "aiStats.humanTakeover": true,
           "aiStats.priority": "normal",
           "aiStats.intent": "ai_runtime_failure",
           "aiStats.lastError": (error?.name || "Error") + ": AI runtime failure; see restricted service logs for details.",
@@ -214,7 +216,7 @@ export default {
           message,
           ticket,
           category,
-          reason: "The AI support runtime failed while processing this ticket. Human support should continue from here.",
+          reason: "The AI provider failed while processing this message. Staff have been notified; the AI will remain available for a later customer message.",
         });
       } catch (fallbackError) {
         logger.error("AI Support", "Failed to send AI fallback for ticket " + ticket.ticketId, fallbackError);
