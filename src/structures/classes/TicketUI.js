@@ -24,12 +24,12 @@ export class TicketUI {
     const container = new ContainerBuilder();
     const isOpen = ticket.status === "open";
     const focus = category.description || "Tell us what you need help with and our support team will assist you.";
-    const welcomeMsg = category.settings?.welcomeMessage || "Thanks for reaching out to HelzerX Studio. Tell me what is happening and I’ll help you work through it.";
+    const welcomeMsg = category.settings?.welcomeMessage || "Thanks for reaching out to HelzerX Technologies. Tell me what is happening and I’ll help you work through it.";
     const aiStatus = category.settings?.aiEnabled === false ? "Human Support" : ticket.aiStats?.humanTakeover ? "Human Staff Handling" : "AI Support Online";
 
     container.addTextDisplayComponents(
       new TextDisplayBuilder().setContent(
-        `## ${emoji.ticket} HelzerX Studio • ${category.name}\n\n${welcomeMsg}\n\n**Category Focus**\n${focus}\n\n**Ticket**\n> **ID:** \`#${ticket.ticketId.replace("ticket_", "").slice(-8)}\`\n> **Status:** ${isOpen ? "🟢 Open" : "🔒 Closed"}\n> **Support:** ${aiStatus}\n> **Creator:** <@${ticket.userId}>`
+        `## ${emoji.ticket} HelzerX Technologies • ${category.name}\n\n${welcomeMsg}\n\n**Category Focus**\n${focus}\n\n**Ticket**\n> **ID:** \`#${ticket.ticketId.replace("ticket_", "").slice(-8)}\`\n> **Status:** ${isOpen ? "🟢 Open" : "🔒 Closed"}\n> **Support:** ${aiStatus}\n> **Creator:** <@${ticket.userId}>`
       )
     );
 
@@ -84,7 +84,7 @@ export class TicketUI {
         "**Customer:** <@" + customerId + ">\n" +
         "**Ticket:** `" + ticketId + "`\n\n" +
         "**Reason**\n" + reason + "\n\n" +
-        "HelzerX Studio AI has paused automated handling for this ticket. A staff member should review and continue the conversation."
+        "HelzerX Technologies AI has paused automated handling for this ticket. A staff member should review and continue the conversation."
       )
     );
 

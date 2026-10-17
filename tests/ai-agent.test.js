@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { toolDeclarations } from "../src/ai/tools.js";
+import { assertResourceOwnership, toolDeclarations } from "../src/ai/tools.js";
 import { buildKnowledgeContext } from "../src/ai/knowledge.js";
 import { config } from "../src/config/config.js";
 import TicketUI from "../src/structures/classes/TicketUI.js";
@@ -85,4 +85,50 @@ test("ticket control panel exposes polished AI support controls", () => {
   assert.match(serialized, /ticket_claim_ticket_0000837/);
   assert.match(serialized, /ticket_transcript_ticket_0000837/);
   assert.match(serialized, /Quick Resolution Guide/);
+});
+
+
+test("AI support resource ownership checks fail closed when owner data is missing", () => {
+  assert.throws(
+    () => assertResourceOwnership({ id: "invoice-1" }, "invoice", "customer-1"),
+    /Unable to verify ownership/i,
+  );
+});
+
+test("AI support resource ownership checks reject another customer's resource", () => {
+  assert.throws(
+    () => assertResourceOwnership({ user_id: "customer-2" }, "service", "customer-1"),
+    /Unable to verify ownership/i,
+  );
+});
+
+test("AI support resource ownership checks accept the verified owner", () => {
+  const resource = { user_id: "customer-1", id: "service-1" };
+  assert.equal(assertResourceOwnership(resource, "service", "customer-1"), resource);
+});
+
+test("AI tool registry never exposes arbitrary shell, SSH, or Docker execution", () => {
+  const names = toolDeclarations.map((tool) => tool.name);
+  assert.equal(names.some((name) => /shell|ssh_exec|docker_exec|execute_command/i.test(name)), false);
+});
+
+
+test("payment link tool does not accept a model-controlled return URL", () => {
+  const tool = toolDeclarations.find((item) => item.name === "create_payment_link");
+  assert.ok(tool);
+  assert.equal(Object.hasOwn(tool.parameters.properties, "return_url"), false);
+});
+
+test("autonomous AI actions are disabled by default unless explicitly opted in", () => {
+  if (process.env.AI_AUTO_ACTIONS == null) {
+    assert.equal(config.ai.autoActions, false);
+  }
+});
+
+ 
+test("AI runtime limits stay within safe bounds", () => {
+  assert.ok(config.ai.cooldownMs >= 250 && config.ai.cooldownMs <= 60000);
+  assert.ok(config.ai.historyLimit >= 1 && config.ai.historyLimit <= 25);
+  assert.ok(config.ai.maxToolRounds >= 1 && config.ai.maxToolRounds <= 12);
+  assert.ok(config.ai.providerTimeoutMs >= 1000 && config.ai.providerTimeoutMs <= 120000);
 });
