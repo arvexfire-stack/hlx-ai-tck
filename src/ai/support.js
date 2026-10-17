@@ -203,7 +203,7 @@ export async function generateSupportReply(input) {
   let toolCalls = 0;
 
   const requestConfig = {
-    maxOutputTokens: 2048,
+    maxOutputTokens: 4096,
     thinkingConfig: {
       thinkingLevel: config.ai.thinkingLevel,
     },
@@ -237,7 +237,15 @@ export async function generateSupportReply(input) {
           text: "I’m not able to give you a reliable answer from the information I have right now, so I’m going to have the support team take a look rather than guess.",
           toolCalls,
           reason: "empty_model_response",
-          diagnostic: { finishReason, blockReason, candidateCount: response.candidates?.length || 0 },
+          diagnostic: {
+            finishReason,
+            blockReason,
+            candidateCount: response.candidates?.length || 0,
+            promptTokenCount: Number(response.usageMetadata?.promptTokenCount || 0),
+            candidatesTokenCount: Number(response.usageMetadata?.candidatesTokenCount || 0),
+            thoughtsTokenCount: Number(response.usageMetadata?.thoughtsTokenCount || 0),
+            totalTokenCount: Number(response.usageMetadata?.totalTokenCount || 0),
+          },
         };
       }
       return { text, toolCalls };
