@@ -1,5 +1,5 @@
 import { config } from "#config/config";
-import { generateSupportReply, formatHistory } from "#ai/support";
+import { generateSupportReply, formatHistory, normalizeMessageContent } from "#ai/support";
 import TicketUI from "#structures/classes/TicketUI";
 import { logger } from "#utils/logger";
 
@@ -75,7 +75,7 @@ export default {
         categoryDescription: category.description || category.settings?.welcomeMessage || "",
         customerName: message.member?.displayName || message.author.username,
         history: formatHistory(previousMessages),
-        latestMessage: message.content,
+        latestMessage: normalizeMessageContent(message),
         model: category.settings?.aiModel || guildConfig?.aiSupport?.model || config.ai.model,
         client,
         message,
@@ -171,7 +171,7 @@ export default {
           "aiStats.humanTakeover": true,
           "aiStats.priority": "normal",
           "aiStats.intent": "ai_runtime_failure",
-          "aiStats.lastError": error.message || "AI runtime failure",
+          "aiStats.lastError": (error?.name || "Error") + ": AI runtime failure; see restricted service logs for details.",
           "aiStats.lastInteractionAt": new Date(),
         });
 
