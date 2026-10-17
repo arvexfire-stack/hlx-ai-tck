@@ -152,7 +152,7 @@ export default {
 
       if (result.reason && result.reason !== "ai_disabled") {
         const diagnostic = result.diagnostic
-          ? " (finishReason=" + result.diagnostic.finishReason + ", blockReason=" + result.diagnostic.blockReason + ", candidates=" + result.diagnostic.candidateCount + ")"
+          ? " (finishReason=" + result.diagnostic.finishReason + ", blockReason=" + result.diagnostic.blockReason + ", candidates=" + result.diagnostic.candidateCount + ", promptTokens=" + result.diagnostic.promptTokenCount + ", outputTokens=" + result.diagnostic.candidatesTokenCount + ", thinkingTokens=" + result.diagnostic.thoughtsTokenCount + ")"
           : "";
         logger.warn("AI Support", "Guardrail used for ticket " + ticket.ticketId + ": " + result.reason + diagnostic);
       }
