@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { buildSupportPrompt, formatHistory, sanitizeToolOutput } from "../src/ai/support.js";
+import { buildSupportPrompt, formatHistory, normalizeMessageContent, sanitizeToolOutput } from "../src/ai/support.js";
 
 test("buildSupportPrompt creates a multilingual, service-aware support agent", () => {
   const prompt = buildSupportPrompt({
@@ -141,4 +141,18 @@ test("sanitizeToolOutput bounds strings, arrays, and nesting", () => {
   assert.equal(sanitizeToolOutput(Array.from({ length: 30 }, (_, i) => i)).length, 20);
   const deep = { a: { b: { c: { d: { e: { f: "too deep" } } } } } }; 
   assert.equal(sanitizeToolOutput(deep).a.b.c.d.e, "[TRUNCATED]");
+});
+
+
+test("normalizeMessageContent includes bounded latest-message attachments and embeds", () => {
+  const message = {
+    content: "",
+    attachments: new Map([["a", { name: "crash.log", contentType: "text/plain" }]]),
+    embeds: [{ title: "Crash report", description: "Server failed on startup" }],
+  };
+  const normalized = normalizeMessageContent(message);
+  assert.match(normalized, /Attachment: crash.log; type: text\\/plain/);
+  assert.match(normalized, /Crash report/);
+  assert.match(normalized, /Server failed on startup/);
+  assert.ok(normalized.length <= 6000);
 });
