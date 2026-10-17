@@ -227,7 +227,7 @@ export async function generateSupportReply(input) {
       const candidateText = candidate?.content?.parts
         ?.filter((part) => typeof part.text === "string")
         .map((part) => part.text)
-        .join("\\n")
+        .join("\n")
         .trim();
       const text = (response.text || candidateText || "").trim();
       if (!text) {
