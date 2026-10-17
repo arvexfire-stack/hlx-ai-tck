@@ -13,20 +13,19 @@ const config = {
   logLevel: "debug",
   logRotationSizeMB: 5,
   defaultContext: "APP",
-  timezone: "Asia/Kolkata",
-
+  timezone: "Asia/Colombo",
   colors: {
-    info: "#2A4A6A", // Deep muted blue
-    success: "#2A4A3A", // Deep muted green
-    warning: "#4A3A1A", // Deep muted amber
-    error: "#4A2525", // Deep muted red
-    debug: "#2A2A2A", // Subtle gray
+    info: "#2A4A6A",
+    success: "#2A4A3A",
+    warning: "#4A3A1A",
+    error: "#4A2525",
+    debug: "#2A2A2A",
   },
   textColors: {
-    message: "#9E9E9E", // Soft gray
-    timestamp: "#5A5A5A", // Dimmer gray
-    dimmed: "#4A4A4A", // Very dim gray
-    badge: "#B8B8B8", // Muted white
+    message: "#9E9E9E",
+    timestamp: "#5A5A5A",
+    dimmed: "#4A4A4A",
+    badge: "#B8B8B8",
   },
 };
 
@@ -44,8 +43,7 @@ const createBgColor = (bgHex, fgHex) => {
   const fgR = parseInt(fgHex.slice(1, 3), 16);
   const fgG = parseInt(fgHex.slice(3, 5), 16);
   const fgB = parseInt(fgHex.slice(5, 7), 16);
-  return (text) =>
-    `\x1b[48;2;${bgR};${bgG};${bgB}m\x1b[38;2;${fgR};${fgG};${fgB}m ${text} \x1b[0m`;
+  return (text) => `\x1b[48;2;${bgR};${bgG};${bgB}m\x1b[38;2;${fgR};${fgG};${fgB}m ${text} \x1b[0m`;
 };
 
 const textStyle = {
@@ -61,7 +59,6 @@ class Logger {
   constructor() {
     this.levels = { debug: 0, info: 1, success: 2, warn: 3, error: 4 };
     this.consoleLogLevel = this.levels[config.logLevel] ?? 1;
-
     this.contextBadges = {
       info: createBgColor(config.colors.info, config.textColors.badge),
       success: createBgColor(config.colors.success, config.textColors.badge),
@@ -70,168 +67,101 @@ class Logger {
       debug: createBgColor(config.colors.debug, config.textColors.badge),
     };
 
-    this.logFilePath = "";
-    this.errorLogFilePath = "";
+    // Always initialize usable paths before touching the filesystem. If the log
+    // directory is unavailable, logging safely falls back to the service journal.
+    this.logFilePath = path.join(LOG_DIR, "app.log");
+    this.errorLogFilePath = path.join(LOG_DIR, "error.log");
+    this.fileLoggingAvailable = false;
     this._initLogFiles();
   }
 
   _getTimestamp() {
     return new Date().toLocaleString("en-IN", {
-      timeZone: config.timezone,
-      year: "numeric",
-      month: "2-digit",
-      day: "2-digit",
-      hour: "2-digit",
-      minute: "2-digit",
-      second: "2-digit",
-      hour12: false,
+      timeZone: config.timezone, year: "numeric", month: "2-digit", day: "2-digit",
+      hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false,
     });
   }
 
   _getTimeOnly() {
     return new Date().toLocaleTimeString("en-IN", {
-      timeZone: config.timezone,
-      hour: "2-digit",
-      minute: "2-digit",
-      second: "2-digit",
-      hour12: false,
+      timeZone: config.timezone, hour: "2-digit", minute: "2-digit",
+      second: "2-digit", hour12: false,
     });
   }
 
   _initLogFiles() {
     try {
-      if (!fs.existsSync(LOG_DIR)) {
-        fs.mkdirSync(LOG_DIR, { recursive: true });
-      }
-      this.logFilePath = path.join(LOG_DIR, "app.log");
-      this.errorLogFilePath = path.join(LOG_DIR, "error.log");
+      fs.mkdirSync(LOG_DIR, { recursive: true });
       this._rotateLogFile(this.logFilePath);
       this._rotateLogFile(this.errorLogFilePath);
+      this.fileLoggingAvailable = true;
       const separator = "=".repeat(80);
-      const startMessage = `\n${separator}\nLog session started at ${this._getTimestamp()} IST\n${separator}`;
-      this._writeToFile(this.logFilePath, startMessage);
+      this._writeToFile(this.logFilePath, `\n${separator}\nLog session started at ${this._getTimestamp()}\n${separator}`);
     } catch (error) {
-      console.error("[Logger] Failed to initialize log files:", error);
+      this.fileLoggingAvailable = false;
+      console.error("[Logger] File logging unavailable; using systemd journal:", error?.message || error);
     }
   }
 
   _rotateLogFile(filePath) {
     try {
       if (!fs.existsSync(filePath)) return;
-      const stats = fs.statSync(filePath);
-      const sizeMB = stats.size / (1024 * 1024);
-      if (sizeMB > config.logRotationSizeMB) {
+      if (fs.statSync(filePath).size / (1024 * 1024) > config.logRotationSizeMB) {
         const timestamp = this._getTimestamp().replace(/[/:,\s]/g, "-");
-        const backupPath = `${filePath}.${timestamp}`;
-        fs.renameSync(filePath, backupPath);
+        fs.renameSync(filePath, `${filePath}.${timestamp}`);
       }
     } catch (error) {
-      console.error("[Logger] Failed to rotate log file:", error);
+      console.error("[Logger] Failed to rotate log file:", error?.message || error);
     }
   }
 
   _writeToFile(filePath, content) {
+    if (!this.fileLoggingAvailable || !filePath) return;
     try {
       fs.appendFileSync(filePath, `${content}\n`);
     } catch (error) {
-      console.error("[Logger] Failed to write to log file:", error);
+      this.fileLoggingAvailable = false;
+      console.error("[Logger] File logging disabled; using systemd journal:", error?.message || error);
     }
   }
 
   _formatForFile(level, context, message) {
-    const timestamp = this._getTimestamp();
-    const levelUpper = level.toUpperCase();
-    return `[${timestamp}] [${levelUpper}] [${context}] ${message}`;
+    return `[${this._getTimestamp()}] [${level.toUpperCase()}] [${context}] ${message}`;
   }
 
   _parseArgs(args) {
     let context = config.defaultContext;
     let errorObject = null;
     const argsCopy = [...args];
-
-    if (argsCopy.length > 0 && argsCopy[argsCopy.length - 1] instanceof Error) {
-      errorObject = argsCopy.pop();
-    }
-
+    if (argsCopy.length > 0 && argsCopy[argsCopy.length - 1] instanceof Error) errorObject = argsCopy.pop();
     if (argsCopy.length > 1 && typeof argsCopy[0] === "string") {
-      const potentialContext = argsCopy[0];
-      const isValidContext =
-        potentialContext.length <= 20 &&
-        /^[A-Z0-9_\-:]+$/i.test(potentialContext);
-      if (isValidContext) {
-        context = argsCopy.shift();
-      }
+      const candidate = argsCopy[0];
+      if (candidate.length <= 20 && /^[A-Z0-9_\-:]+$/i.test(candidate)) context = argsCopy.shift();
     }
-
-    const message = argsCopy.length > 0 ? util.format(...argsCopy) : "";
-
-    return { context, message, errorObject };
+    return { context, message: argsCopy.length ? util.format(...argsCopy) : "", errorObject };
   }
 
   _log(level, ...args) {
-    const levelNum = this.levels[level];
-    if (levelNum < this.consoleLogLevel) return;
-
+    if ((this.levels[level] ?? 1) < this.consoleLogLevel) return;
     const { context, message, errorObject } = this._parseArgs(args);
-
-    const timestamp = this._getTimeOnly();
-    const contextBadge = this.contextBadges[level](context);
-    const formattedMessage = `${textStyle.timestamp(timestamp)} ${contextBadge} ${textStyle.message(message)}`;
-
-    const logMethod =
-      level === "error" || level === "warn" ? console.warn : console.log;
-    logMethod(formattedMessage);
-
+    const formatted = `${textStyle.timestamp(this._getTimeOnly())} ${this.contextBadges[level](context)} ${textStyle.message(message)}`;
+    (level === "error" || level === "warn" ? console.warn : console.log)(formatted);
     const fileMessage = this._formatForFile(level, context, message);
     this._writeToFile(this.logFilePath, fileMessage);
 
-    const finalErrorObject =
-      level === "error" && !errorObject ? new Error(message) : errorObject;
-
-    if (finalErrorObject) {
-      const errorStack =
-        finalErrorObject.stack ||
-        util.inspect(finalErrorObject, { depth: null });
-      let errorText;
-
-      if (Array.isArray(finalErrorObject.errors)) {
-        errorText = finalErrorObject.errors
-          .map((e) => e.text || util.inspect(e))
-          .join("\n");
-      } else {
-        errorText =
-          finalErrorObject.stack ||
-          finalErrorObject.message ||
-          util.inspect(finalErrorObject, { depth: null });
-      }
-
-      console.log(textStyle.dimmed(errorText));
-
-      console.log(textStyle.dimmed(errorText));
-      const errorFileMessage = `${fileMessage}\n${errorStack}`;
-      this._writeToFile(this.errorLogFilePath, errorFileMessage);
+    const finalError = level === "error" && !errorObject ? new Error(message) : errorObject;
+    if (finalError) {
+      const stack = finalError.stack || util.inspect(finalError, { depth: 4 });
+      console.log(textStyle.dimmed(stack));
+      this._writeToFile(this.errorLogFilePath, `${fileMessage}\n${stack}`);
     }
   }
 
-  info(...args) {
-    this._log("info", ...args);
-  }
-
-  success(...args) {
-    this._log("success", ...args);
-  }
-  warn(...args) {
-    this._log("warn", ...args);
-  }
-
-  error(...args) {
-    this._log("error", ...args);
-  }
-
-  debug(...args) {
-    this._log("debug", ...args);
-  }
+  info(...args) { this._log("info", ...args); }
+  success(...args) { this._log("success", ...args); }
+  warn(...args) { this._log("warn", ...args); }
+  error(...args) { this._log("error", ...args); }
+  debug(...args) { this._log("debug", ...args); }
 }
-export const logger = new Logger();
 
-// warm bread
+export const logger = new Logger();
