@@ -273,7 +273,11 @@ export default {
     } catch (error) {
       const failure = classifyProviderFailure(error);
       const quotaExhausted = failure.code === "gemini_quota_exhausted";
-      quotaCooldownUntil = Math.max(quotaCooldownUntil, Date.now() + failure.retryDelayMs);
+      // Only a confirmed daily quota error may open the long quota circuit breaker.
+      // A timeout or generic 5xx must never be mislabeled as quota exhaustion.
+      if (quotaExhausted) {
+        quotaCooldownUntil = Math.max(quotaCooldownUntil, Date.now() + failure.retryDelayMs);
+      }
       logger.error("AI Support", "Failed to process ticket " + ticket.ticketId + ": " + failure.code + ". See provider error details below.", error);
 
       try {
