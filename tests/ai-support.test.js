@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { buildSupportPrompt, formatHistory, generateContentWithRetry, normalizeMessageContent, sanitizeToolOutput } from "../src/ai/support.js";
+import { buildSupportPrompt, formatHistory, generateContentWithRetry, isQuotaExhaustedError, normalizeMessageContent, sanitizeToolOutput } from "../src/ai/support.js";
 
 test("buildSupportPrompt creates a multilingual, service-aware support agent", () => {
   const prompt = buildSupportPrompt({
@@ -206,3 +206,34 @@ test("generateContentWithRetry stops after the configured attempt limit", async 
   assert.equal(calls, 3);
 });
 
+
+
+test("Gemini daily quota exhaustion is detected and is not retried", async () => {
+  const quotaError = new Error('{"error":{"code":429,"message":"You exceeded your current quota. Quota exceeded for metric generate_content_free_tier_requests; retry in 10h." ,"status":"RESOURCE_EXHAUSTED"}}');
+  quotaError.status = 429;
+  assert.equal(isQuotaExhaustedError(quotaError), true);
+
+  let calls = 0;
+  await assert.rejects(
+    generateContentWithRetry(async () => {
+      calls += 1;
+      throw quotaError;
+    }, { attempts: 3, delayMs: 1, sleep: async () => {} }),
+  );
+  assert.equal(calls, 1);
+});
+
+test("transient 429 rate limits remain retryable when they are not quota exhaustion", async () => {
+  const rateLimitError = new Error("Too many requests; retry shortly.");
+  rateLimitError.status = 429;
+  assert.equal(isQuotaExhaustedError(rateLimitError), false);
+
+  let calls = 0;
+  const result = await generateContentWithRetry(async () => {
+    calls += 1;
+    if (calls === 1) throw rateLimitError;
+    return { text: "recovered" };
+  }, { attempts: 2, delayMs: 1, sleep: async () => {} });
+  assert.deepEqual(result, { text: "recovered" });
+  assert.equal(calls, 2);
+});
