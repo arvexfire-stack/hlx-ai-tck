@@ -54,6 +54,36 @@ export async function generateContentWithRetry(generate, {
   throw lastError;
 }
 
+const isFallbackEligibleError = (error) => {
+  if (isQuotaExhaustedError(error)) return false;
+  const status = Number(error?.status || error?.code || error?.error?.code || 0);
+  const message = String(error?.message || error?.error?.message || "");
+  return [404, 408, 429, 500, 502, 503, 504].includes(status)
+    || /\b(UNAVAILABLE|INTERNAL|DEADLINE_EXCEEDED|ECONNRESET|ETIMEDOUT|EAI_AGAIN|not found for API version|unsupported model|is not supported)\b/i.test(message)
+    || /timed out|timeout/i.test(message);
+};
+
+export async function generateContentWithModelFallback(generate, {
+  primaryModel,
+  fallbackModel,
+  retryOptions = {},
+} = {}) {
+  if (!primaryModel) throw new Error("A primary Gemini model must be configured.");
+  try {
+    return {
+      response: await generateContentWithRetry(() => generate(primaryModel), retryOptions),
+      model: primaryModel,
+      usedFallback: false,
+    };
+  } catch (primaryError) {
+    if (!fallbackModel || fallbackModel === primaryModel || !isFallbackEligibleError(primaryError)) {
+      throw primaryError;
+    }
+    const response = await generateContentWithRetry(() => generate(fallbackModel), retryOptions);
+    return { response, model: fallbackModel, usedFallback: true };
+  }
+}
+
 const SENSITIVE_FIELD = /password|passphrase|secret|token|api[_-]?key|private[_-]?key|authorization|cookie|session|cvv|card[_-]?number|client[_-]?secret/i;
 
 export function sanitizeToolOutput(value, depth = 0) {
@@ -240,25 +270,37 @@ export async function generateSupportReply(input) {
 
   const requestConfig = {
     maxOutputTokens: 4096,
-    thinkingConfig: {
-      thinkingLevel: config.ai.thinkingLevel,
-    },
     systemInstruction: buildSupportPrompt(input),
     tools: [{ functionDeclarations: toolDeclarations }],
   };
+  const primaryModel = input.model || config.ai.model;
+  const fallbackModel = config.ai.fallbackModel;
+  let activeModel = primaryModel;
 
   for (let round = 0; round < config.ai.maxToolRounds; round += 1) {
-    const response = await generateContentWithRetry(
-      () => withTimeout(
+    const generated = await generateContentWithModelFallback(
+      (model) => withTimeout(
         client.models.generateContent({
-          model: input.model || config.ai.model,
+          model,
           contents,
-          config: requestConfig,
+          config: {
+            ...requestConfig,
+            // Gemini 3 uses thinkingLevel; Gemini 2.5 uses thinkingBudget.
+            thinkingConfig: model.startsWith("gemini-3")
+              ? { thinkingLevel: config.ai.thinkingLevel }
+              : { thinkingBudget: 1024 },
+          },
         }),
         config.ai.providerTimeoutMs,
       ),
-      { attempts: 3, delayMs: 800 },
+      {
+        primaryModel: activeModel,
+        fallbackModel: activeModel === fallbackModel ? null : fallbackModel,
+        retryOptions: { attempts: 3, delayMs: 800 },
+      },
     );
+    const response = generated.response;
+    activeModel = generated.model;
 
     const calls = response.functionCalls || [];
     if (!calls.length) {
