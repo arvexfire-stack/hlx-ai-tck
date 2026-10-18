@@ -126,7 +126,15 @@ export async function searchHelzerXWebsites(query, { maxPages = 5 } = {}) {
   const limit = Math.max(1, Math.min(Number(maxPages) || 5, MAX_DISCOVERED_PAGES));
   const pages = [];
   const failures = [];
-  for (const site of HELZERX_SITES) {
+  const queryTerms = q.toLowerCase();
+  const preferredSites = [...HELZERX_SITES].sort((a, b) => {
+    const score = (site) => (queryTerms.includes("vps") || queryTerms.includes("cloud") || queryTerms.includes("ram") ? (/cloud/i.test(site.name) ? 10 : 0) : 0)
+      + (queryTerms.includes("studio") || queryTerms.includes("development") ? (/studio/i.test(site.name) ? 10 : 0) : 0)
+      + (queryTerms.includes("free hosting") || queryTerms.includes("free host") ? (/free hosting/i.test(site.name) ? 10 : 0) : 0)
+      + (queryTerms.includes("game") || queryTerms.includes("bot hosting") || queryTerms.includes("minecraft") ? (/game|bot/i.test(site.name) ? 10 : 0) : 0);
+    return score(b) - score(a);
+  });
+  for (const site of preferredSites) {
     if (pages.length >= limit) break;
     try {
       const response = await fetchWithTimeout(site.url);
