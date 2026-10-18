@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { listHelzerXSites, readHelzerXWebsite, searchWeb } from "../src/ai/webIntelligence.js";
+import { listHelzerXSites, readHelzerXWebsite, searchHelzerXWebsites, searchWeb } from "../src/ai/webIntelligence.js";
 
 test("lists all five official HelzerX websites", () => {
   const sites = listHelzerXSites();
@@ -89,5 +89,32 @@ test("uses Tavily and bounds returned search results", async () => {
     else process.env.TAVILY_API_KEY = previousKey;
     if (previousBraveKey === undefined) delete process.env.BRAVE_SEARCH_API_KEY;
     else process.env.BRAVE_SEARCH_API_KEY = previousBraveKey;
+  }
+});
+
+
+test("searches official HelzerX homepages and follows relevant same-domain pricing links", async () => {
+  const previousFetch = globalThis.fetch;
+  const requests = [];
+  globalThis.fetch = async (input) => {
+    const url = new URL(String(input));
+    requests.push(url.href);
+    const content = url.pathname === "/pricing"
+      ? "<html><body><h1>VPS Pricing</h1><p>12GB VPS plan price: $9 per month.</p></body></html>"
+      : '<html><body><h1>HelzerX hosting</h1><a href="/pricing">VPS Pricing</a></body></html>';
+    return new Response(content, {
+      status: 200,
+      headers: { "content-type": "text/html; charset=utf-8" },
+    });
+  };
+
+  try {
+    const result = await searchHelzerXWebsites("12GB VPS price", { maxPages: 6 });
+    assert.ok(requests.some((url) => new URL(url).hostname === "cloud.helzerx.cyou"));
+    assert.ok(result.results.some((page) => new URL(page.url).pathname === "/pricing"));
+    assert.ok(result.results.every((page) => page.url.startsWith("https://")));
+    assert.ok(result.pagesChecked <= 6);
+  } finally {
+    globalThis.fetch = previousFetch;
   }
 });
