@@ -2,7 +2,7 @@ import { config } from "#config/config";
 import { VPSBotClient } from "#integrations/vpsClient";
 import { HelzerXClient } from "#integrations/helzerxClient";
 import TicketUI from "#structures/classes/TicketUI";
-import { listHelzerXSites, readHelzerXWebsite, searchWeb } from "#ai/webIntelligence";
+import { listHelzerXSites, readHelzerXWebsite, searchHelzerXWebsites, searchWeb } from "#ai/webIntelligence";
 import { getMinecraftPricing } from "#ai/pricing";
 
 const declaration = (name, description, properties = {}, required = []) => ({
@@ -16,6 +16,10 @@ export const toolDeclarations = [
     query: { type: "STRING", description: "Specific search query." },
   }, ["query"]),
   declaration("list_helzerx_websites", "List official HelzerX websites and their purposes.", {}),
+  declaration("search_helzerx_websites", "Search official HelzerX sites by crawling public HTTPS pages for current service details, prices, plans, and documentation. Use before escalating ordinary product or pricing questions.", {
+    query: { type: "STRING", description: "Customer question and relevant product/RAM/feature terms." },
+    max_pages: { type: "INTEGER", description: "Maximum official pages to inspect, from 1 to 8." },
+  }, ["query"]),
   declaration("read_helzerx_website", "Read a page from an official HelzerX HTTPS website to verify services, plans, and prices. Only official HelzerX domains are allowed.", {
     url: { type: "STRING", description: "HTTPS URL on one of the official HelzerX domains." },
   }, ["url"]),
@@ -165,6 +169,9 @@ export function createToolExecutor({ client, message, ticket, category }) {
     },
     async read_helzerx_website(args) {
       return readHelzerXWebsite(args.url);
+    },
+    async search_helzerx_websites(args) {
+      return searchHelzerXWebsites(args.query, { maxPages: args.max_pages });
     },
     async get_minecraft_pricing(args) {
       return getMinecraftPricing(args);
