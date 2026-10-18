@@ -10,6 +10,9 @@ test("AI tool registry exposes full business support without shell access", () =
   const names = toolDeclarations.map((tool) => tool.name);
 
   for (const name of [
+    "search_helzerx_websites",
+    "list_helzerx_websites",
+    "read_helzerx_website",
     "get_service_catalog",
     "get_service",
     "request_service_action",
