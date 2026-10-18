@@ -213,12 +213,15 @@ export default {
     if (Date.now() < quotaCooldownUntil) {
       const alreadyNotified = ticket.aiStats?.lastError === QUOTA_ERROR_MARKER;
       await client.db.updateTicket(ticket.ticketId, {
-        "aiStats.escalated": true,
         "aiStats.priority": "normal",
         "aiStats.intent": "ai_quota_exhausted",
         "aiStats.lastError": QUOTA_ERROR_MARKER,
         "aiStats.lastInteractionAt": new Date(),
       });
+      await message.channel.send({
+        content: "Our automated support provider is temporarily unavailable, so I cannot safely verify an answer right now. Your ticket remains open; please try again shortly. If this is urgent, the support team has been notified.",
+        allowedMentions: { parse: [] },
+      }).catch(() => {});
       if (!alreadyNotified) {
         await notifyRuntimeEscalation({
           message,
@@ -343,23 +346,35 @@ export default {
       logger.error("AI Support", "Failed to process ticket " + ticket.ticketId + ": " + failure.code + ". See provider error details below.", error);
 
       try {
-        // A provider/API outage must not permanently disable AI for this ticket.
-        // Keep a precise machine-classified reason; do not imply the model wrote
-        // a diagnosis when the model failed before generating any response.
+        // A provider outage is not itself a human takeover. Preserve the ticket's
+        // AI eligibility so a later customer message can be processed after recovery.
+        const previousError = ticket.aiStats?.lastError;
+        const shouldNotifyStaff = previousError !== failure.code
+          && previousError !== (failure.code + ": " + (error?.name || "Error"));
         await client.db.updateTicket(ticket.ticketId, {
-          "aiStats.escalated": true,
           "aiStats.priority": "normal",
           "aiStats.intent": failure.code,
           "aiStats.lastError": quotaExhausted ? QUOTA_ERROR_MARKER : failure.code + ": " + (error?.name || "Error"),
           "aiStats.lastInteractionAt": new Date(),
         });
 
-        await notifyRuntimeEscalation({
-          message,
-          ticket,
-          category,
-          reason: failure.staffReason,
+        await message.channel.send({
+          content: "Our automated support provider is temporarily unavailable, so I cannot safely verify an answer right now. Your ticket remains open; please try again shortly. If this is urgent, the support team can assist.",
+          allowedMentions: { parse: [] },
+        }).catch((sendError) => {
+          logger.error("AI Support", "Could not send provider-unavailable notice for ticket " + ticket.ticketId, sendError);
         });
+
+        // Notify staff once for a continuous provider failure, but do not take over
+        // the ticket or suppress later customer messages.
+        if (shouldNotifyStaff) {
+          await notifyRuntimeEscalation({
+            message,
+            ticket,
+            category,
+            reason: failure.staffReason,
+          });
+        }
       } catch (fallbackError) {
         logger.error("AI Support", "Failed to send AI fallback for ticket " + ticket.ticketId, fallbackError);
       }
