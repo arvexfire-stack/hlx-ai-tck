@@ -317,6 +317,11 @@ test("provider failures classify quota, timeout, invalid key, and unavailable mo
   assert.match(quota.staffReason, /before generating a response/i);
   assert.ok(quota.retryDelayMs >= 10 * 60 * 60 * 1000);
 
+  const unavailable = classifyProviderFailure(Object.assign(new Error('{"error":{"code":503,"message":"This model is currently experiencing high demand.","status":"UNAVAILABLE"}}'), { status: 503 }));
+  assert.equal(unavailable.code, "ai_provider_unavailable");
+  assert.match(unavailable.staffReason, /temporarily unavailable or overloaded/i);
+  assert.equal(unavailable.retryDelayMs, 30_000);
+
   const timeout = classifyProviderFailure(new Error("AI provider request timed out."));
   assert.equal(timeout.code, "ai_provider_timeout");
   assert.match(timeout.staffReason, /timed out/i);
