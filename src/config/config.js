@@ -25,6 +25,7 @@ export const config = {
     enabled: parseBool(process.env.AI_ENABLED, true),
     apiKey: process.env.GEMINI_API_KEY,
     model: process.env.GEMINI_MODEL || "gemini-3.8-flash",
+    fallbackModel: process.env.GEMINI_FALLBACK_MODEL || "gemini-2.5-flash",
     cooldownMs: parseIntInRange(process.env.AI_COOLDOWN_MS, 1800, 250, 60000),
     historyLimit: parseIntInRange(process.env.AI_HISTORY_LIMIT, 16, 1, 25),
     staffSilenceMs: parseIntInRange(process.env.AI_STAFF_SILENCE_MS, 5 * 60 * 1000, 0, 60 * 60 * 1000),

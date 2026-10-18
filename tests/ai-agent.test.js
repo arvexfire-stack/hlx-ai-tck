@@ -131,6 +131,11 @@ test("autonomous AI actions are disabled by default unless explicitly opted in",
 });
 
  
+test("AI fallback model is configurable and has a safe default", () => {
+  assert.equal(config.ai.fallbackModel, process.env.GEMINI_FALLBACK_MODEL || "gemini-2.5-flash");
+  assert.notEqual(config.ai.fallbackModel, config.ai.model);
+});
+
 test("AI runtime limits stay within safe bounds", () => {
   assert.ok(config.ai.cooldownMs >= 250 && config.ai.cooldownMs <= 60000);
   assert.ok(config.ai.historyLimit >= 1 && config.ai.historyLimit <= 25);
