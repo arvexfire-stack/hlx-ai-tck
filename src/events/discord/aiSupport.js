@@ -111,20 +111,34 @@ function quotaRetryDelayMs(error) {
 }
 
 async function notifyRuntimeEscalation({ message, ticket, category, reason }) {
-  const roles = category?.supportRoles || [];
-  const priority = "normal";
+  // Tickets may be closed/deleted while an asynchronous provider request is running.
+  // Never dereference a missing channel/author or attempt to post into a deleted ticket.
+  const channel = message?.channel;
+  const customerId = message?.author?.id;
+  if (!channel || typeof channel.send !== "function" || !customerId || !ticket?.ticketId) {
+    logger.info("AI Support", "Skipped staff escalation because the source ticket message/channel is no longer available.");
+    return false;
+  }
 
-  await message.channel.send({
-    components: [TicketUI.buildStaffEscalation({
-      reason,
-      priority,
-      ticketId: ticket.ticketId,
-      customerId: message.author.id,
-      staffRoles: roles,
-    })],
-    flags: TicketUI.getFlags(),
-    allowedMentions: { roles },
-  }).catch(() => {});
+  try {
+    const roles = category?.supportRoles || [];
+    await channel.send({
+      components: [TicketUI.buildStaffEscalation({
+        reason,
+        priority: "normal",
+        ticketId: ticket.ticketId,
+        customerId,
+        staffRoles: roles,
+      })],
+      flags: TicketUI.getFlags(),
+      allowedMentions: { roles },
+    });
+    return true;
+  } catch (error) {
+    // Discord can reject a send if the channel was deleted during the request.
+    logger.warn("AI Support", "Could not post staff escalation for ticket " + ticket.ticketId + ": " + (error?.code || error?.name || "send_failed"));
+    return false;
+  }
 }
 
 export default {
@@ -154,6 +168,9 @@ export default {
   },
 
   async processMessage({ message, client }) {
+    if (!message?.guild?.id || !message?.author?.id || !message?.channel?.id || typeof message.channel.send !== "function") {
+      return;
+    }
     if (!config.ai.enabled || !config.ai.apiKey) {
       logger.warn("AI Support", "Skipped message: AI is disabled or Gemini API key is not configured.");
       return;
@@ -344,6 +361,14 @@ export default {
         logger.warn("AI Support", "Guardrail used for ticket " + ticket.ticketId + ": " + result.reason + diagnostic);
       }
     } catch (error) {
+      // A ticket can be closed/deleted while the model or a tool is still running.
+      // In that case there is no customer-facing destination; avoid the old null.send
+      // / null.id crash and do not write stale provider failures onto a closed ticket.
+      const latestTicketAfterError = await client.db.getTicket(ticket.ticketId).catch(() => null);
+      if (!latestTicketAfterError || latestTicketAfterError.status !== "open" || !message?.channel || typeof message.channel.send !== "function" || !message?.author?.id) {
+        logger.info("AI Support", "Ignored late AI failure for closed/deleted ticket " + ticket.ticketId + ".");
+        return;
+      }
       const failure = classifyProviderFailure(error);
       const quotaExhausted = failure.code === "gemini_quota_exhausted";
       // Only a confirmed daily quota error may open the long quota circuit breaker.
