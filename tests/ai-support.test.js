@@ -2,6 +2,17 @@ import test from "node:test";
 import { classifyProviderFailure } from "../src/events/discord/aiSupport.js";
 import assert from "node:assert/strict";
 import { buildSupportPrompt, formatHistory, generateContentWithRetry, isQuotaExhaustedError, normalizeMessageContent, sanitizeToolOutput } from "../src/ai/support.js";
+import { getSimpleGreetingReply } from "../src/events/discord/aiSupport.js";
+
+test("simple greetings use a safe canned welcome and do not classify support requests as greetings", () => {
+  for (const greeting of ["Hi", "hello!", "HEY", "good morning", "yo?"]) {
+    assert.ok(getSimpleGreetingReply(greeting), greeting + " should be recognized");
+  }
+  for (const message of ["Hello, my VPS is down", "my VPS not working", "hi can you help with billing", ""]) {
+    assert.equal(getSimpleGreetingReply(message), null, message + " must go through AI support");
+  }
+  assert.match(getSimpleGreetingReply("Hello"), /HelzerX Technologies support/i);
+});
 
 test("buildSupportPrompt creates a multilingual, service-aware support agent", () => {
   const prompt = buildSupportPrompt({
