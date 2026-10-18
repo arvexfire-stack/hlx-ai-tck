@@ -8,6 +8,7 @@ import TicketUI from "../src/structures/classes/TicketUI.js";
 
 test("AI tool registry exposes full business support without shell access", () => {
   const names = toolDeclarations.map((tool) => tool.name);
+  assert.equal(new Set(names).size, names.length, "tool names must be unique for the Gemini function registry");
 
   for (const name of [
     "search_helzerx_websites",
