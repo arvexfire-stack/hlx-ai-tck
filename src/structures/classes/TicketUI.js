@@ -84,7 +84,7 @@ export class TicketUI {
         "**Customer:** <@" + customerId + ">\n" +
         "**Ticket:** `" + ticketId + "`\n\n" +
         "**Reason**\n" + reason + "\n\n" +
-        "HelzerX Technologies AI has paused automated handling for this ticket. A staff member should review and continue the conversation."
+        "A staff member should review this issue. Automated AI replies may be unavailable until the provider error is resolved; this notice does not mean the ticket has been permanently handed over."
       )
     );
 

@@ -80,7 +80,7 @@ export class DatabaseManager extends EventEmitter {
     const guild = await Guild.findOneAndUpdate(
       { guildId },
       { $set: data },
-      { new: true }
+      { returnDocument: "after" }
     );
     logger.debug("Database", `Guild updated: ${guildId}`);
     return guild;
@@ -97,7 +97,7 @@ export class DatabaseManager extends EventEmitter {
     return await Guild.findOneAndUpdate(
       { guildId },
       { $set: { prefix } },
-      { new: true }
+      { returnDocument: "after" }
     );
   }
 
@@ -120,7 +120,7 @@ export class DatabaseManager extends EventEmitter {
           },
         },
       },
-      { new: true }
+      { returnDocument: "after" }
     );
     this.client.emit("userBlacklisted", { guildId, userId, reason, blacklistedBy });
     return guild;
@@ -130,7 +130,7 @@ export class DatabaseManager extends EventEmitter {
     const guild = await Guild.findOneAndUpdate(
       { guildId },
       { $pull: { blacklistedUsers: { userId } } },
-      { new: true }
+      { returnDocument: "after" }
     );
     this.client.emit("userUnblacklisted", { guildId, userId });
     return guild;
@@ -155,7 +155,7 @@ export class DatabaseManager extends EventEmitter {
     const guild = await Guild.findOneAndUpdate(
       { guildId },
       { $addToSet: { staffRoles: roleId } },
-      { new: true }
+      { returnDocument: "after" }
     );
     return guild;
   }
@@ -164,7 +164,7 @@ export class DatabaseManager extends EventEmitter {
     const guild = await Guild.findOneAndUpdate(
       { guildId },
       { $pull: { staffRoles: roleId } },
-      { new: true }
+      { returnDocument: "after" }
     );
     return guild;
   }
@@ -203,7 +203,7 @@ export class DatabaseManager extends EventEmitter {
     const panel = await Panel.findOneAndUpdate(
       { panelId },
       { $set: data },
-      { new: true }
+      { returnDocument: "after" }
     );
     return panel;
   }
@@ -230,8 +230,8 @@ async setPanelMessageId(panelId, channelId, messageId) {
 
   async togglePanelActive(panelId) {
     const panel = await this.getPanel(panelId);
-    const updated = await this.updatePanel(panelId, { isActive: !panel.isActive });
-    return updated;
+    if (!panel) return null;
+    return this.updatePanel(panelId, { isActive: !panel.isActive });
   }
 
   async deletePanel(panelId) {
@@ -252,27 +252,27 @@ async setPanelMessageId(panelId, channelId, messageId) {
           },
         },
       },
-      { new: true }
+      { returnDocument: "after" }
     );
     return panel;
   }
 
   async updateCategory(panelId, categoryId, data) {
     const panel = await this.getPanel(panelId);
-    const category = panel.categories.find(c => c.categoryId === categoryId);
-    const updated = await Panel.findOneAndUpdate(
+    const category = panel?.categories?.find((item) => item.categoryId === categoryId);
+    if (!category) return null;
+    return Panel.findOneAndUpdate(
       { panelId, "categories.categoryId": categoryId },
       { $set: { "categories.$": { ...category.toObject(), ...data } } },
-      { new: true }
+      { returnDocument: "after" }
     );
-    return updated;
   }
 
   async removeCategory(panelId, categoryId) {
     const panel = await Panel.findOneAndUpdate(
       { panelId },
       { $pull: { categories: { categoryId } } },
-      { new: true }
+      { returnDocument: "after" }
     );
     return panel;
   }
@@ -283,35 +283,40 @@ async setPanelMessageId(panelId, channelId, messageId) {
   }
 
   async toggleCategoryActive(panelId, categoryId) {
-    const category = await this.getCategory(panelId, categoryId);
     const panel = await this.getPanel(panelId);
-    const updatedCategory = panel.categories.find(c => c.categoryId === categoryId);
-    updatedCategory.isActive = !category.isActive;
-    const updated = await Panel.findOneAndUpdate(
+    const category = panel?.categories?.find((item) => item.categoryId === categoryId);
+    if (!category) return null;
+    const updatedCategory = { ...category.toObject(), isActive: !category.isActive };
+    return Panel.findOneAndUpdate(
       { panelId, "categories.categoryId": categoryId },
       { $set: { "categories.$": updatedCategory } },
-      { new: true }
+      { returnDocument: "after" }
     );
-    return updated;
   }
 
   async updateCategorySettings(panelId, categoryId, settings) {
     const panel = await this.getPanel(panelId);
-    const category = panel.categories.find(c => c.categoryId === categoryId);
-    category.settings = { ...category.settings.toObject(), ...settings };
-    const updated = await Panel.findOneAndUpdate(
+    const category = panel?.categories?.find((item) => item.categoryId === categoryId);
+    if (!category) return null;
+    const currentSettings = category.settings?.toObject
+      ? category.settings.toObject()
+      : (category.settings || {});
+    const updatedCategory = {
+      ...category.toObject(),
+      settings: { ...currentSettings, ...settings },
+    };
+    return Panel.findOneAndUpdate(
       { panelId, "categories.categoryId": categoryId },
-      { $set: { "categories.$": category } },
-      { new: true }
+      { $set: { "categories.$": updatedCategory } },
+      { returnDocument: "after" }
     );
-    return updated;
   }
 
   async addCategorySupportRole(panelId, categoryId, roleId) {
     const panel = await Panel.findOneAndUpdate(
       { panelId, "categories.categoryId": categoryId },
       { $addToSet: { "categories.$.supportRoles": roleId } },
-      { new: true }
+      { returnDocument: "after" }
     );
     return panel;
   }
@@ -320,7 +325,7 @@ async setPanelMessageId(panelId, channelId, messageId) {
     const panel = await Panel.findOneAndUpdate(
       { panelId, "categories.categoryId": categoryId },
       { $pull: { "categories.$.supportRoles": roleId } },
-      { new: true }
+      { returnDocument: "after" }
     );
     return panel;
   }
@@ -328,12 +333,12 @@ async setPanelMessageId(panelId, channelId, messageId) {
   async createTicket(guildId, panelId, categoryId, userId, data = {}) {
     const ticketId = `ticket_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
     const ticket = await Ticket.create({
+      ...data,
       ticketId,
       guildId,
       panelId,
       categoryId,
       userId,
-      ...data,
     });
     this.client.emit("ticketCreated", { ticketId, guildId, panelId, categoryId, userId, ticket });
     return ticket;
@@ -389,7 +394,7 @@ async setPanelMessageId(panelId, channelId, messageId) {
     const ticket = await Ticket.findOneAndUpdate(
       { ticketId },
       { $set: data },
-      { new: true }
+      { returnDocument: "after" }
     );
     return ticket;
   }
@@ -413,7 +418,7 @@ async setPanelMessageId(panelId, channelId, messageId) {
           "aiStats.lastActionAt": new Date(),
         },
       },
-      { new: true }
+      { returnDocument: "after" }
     );
     return ticket;
   }
@@ -428,7 +433,7 @@ async setPanelMessageId(panelId, channelId, messageId) {
           "aiStats.humanTakeover": false,
         },
       },
-      { new: true }
+      { returnDocument: "after" }
     );
   }
 
@@ -444,14 +449,15 @@ async setPanelMessageId(panelId, channelId, messageId) {
           },
         },
       },
-      { new: true }
+      { returnDocument: "after" }
     );
-    this.client.emit("ticketUserAdded", { 
-      ticketId, 
-      guildId: ticket.guildId, 
-      userId, 
+    if (!ticket) return null;
+    this.client.emit("ticketUserAdded", {
+      ticketId,
+      guildId: ticket.guildId,
+      userId,
       addedBy,
-      channelId: ticket.channelId 
+      channelId: ticket.channelId,
     });
     return ticket;
   }
@@ -471,14 +477,15 @@ async setPanelMessageId(panelId, channelId, messageId) {
           addedUsers: { userId },
         },
       },
-      { new: true }
+      { returnDocument: "after" }
     );
-    this.client.emit("ticketUserRemoved", { 
-      ticketId, 
-      guildId: ticket.guildId, 
-      userId, 
+    if (!ticket) return null;
+    this.client.emit("ticketUserRemoved", {
+      ticketId,
+      guildId: ticket.guildId,
+      userId,
       removedBy,
-      channelId: ticket.channelId 
+      channelId: ticket.channelId,
     });
     return ticket;
   }
@@ -504,15 +511,16 @@ async setPanelMessageId(panelId, channelId, messageId) {
           closeReason: reason,
         },
       },
-      { new: true }
+      { returnDocument: "after" }
     );
-    this.client.emit("ticketClosed", { 
-      ticketId, 
-      guildId: ticket.guildId, 
+    if (!ticket) return null;
+    this.client.emit("ticketClosed", {
+      ticketId,
+      guildId: ticket.guildId,
       userId: ticket.userId,
-      closedBy, 
+      closedBy,
       reason,
-      channelId: ticket.channelId 
+      channelId: ticket.channelId,
     });
     return ticket;
   }
@@ -528,13 +536,14 @@ async setPanelMessageId(panelId, channelId, messageId) {
           closeReason: null,
         },
       },
-      { new: true }
+      { returnDocument: "after" }
     );
-    this.client.emit("ticketReopened", { 
-      ticketId, 
-      guildId: ticket.guildId, 
+    if (!ticket) return null;
+    this.client.emit("ticketReopened", {
+      ticketId,
+      guildId: ticket.guildId,
       userId: ticket.userId,
-      channelId: ticket.channelId 
+      channelId: ticket.channelId,
     });
     return ticket;
   }
@@ -549,15 +558,16 @@ async setPanelMessageId(panelId, channelId, messageId) {
           "rating.ratedAt": new Date(),
         },
       },
-      { new: true }
+      { returnDocument: "after" }
     );
-    this.client.emit("ticketRated", { 
-      ticketId, 
-      guildId: ticket.guildId, 
+    if (!ticket) return null;
+    this.client.emit("ticketRated", {
+      ticketId,
+      guildId: ticket.guildId,
       userId: ticket.userId,
-      stars, 
+      stars,
       feedback,
-      channelId: ticket.channelId 
+      channelId: ticket.channelId,
     });
     return ticket;
   }

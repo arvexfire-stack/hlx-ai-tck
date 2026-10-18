@@ -1,14 +1,19 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { assertResourceOwnership, toolDeclarations } from "../src/ai/tools.js";
+import { assertResourceOwnership, resolvePaidVpsPlans, toolDeclarations } from "../src/ai/tools.js";
+import { getMinecraftPricing } from "../src/ai/pricing.js";
 import { buildKnowledgeContext } from "../src/ai/knowledge.js";
 import { config } from "../src/config/config.js";
 import TicketUI from "../src/structures/classes/TicketUI.js";
 
 test("AI tool registry exposes full business support without shell access", () => {
   const names = toolDeclarations.map((tool) => tool.name);
+  assert.equal(new Set(names).size, names.length, "tool names must be unique for the Gemini function registry");
 
   for (const name of [
+    "search_helzerx_websites",
+    "list_helzerx_websites",
+    "read_helzerx_website",
     "get_service_catalog",
     "get_service",
     "request_service_action",
@@ -126,9 +131,63 @@ test("autonomous AI actions are disabled by default unless explicitly opted in",
 });
 
  
+test("AI fallback model is configurable and has a safe default", () => {
+  assert.equal(config.ai.fallbackModel, process.env.GEMINI_FALLBACK_MODEL || "gemini-2.5-flash");
+  assert.notEqual(config.ai.fallbackModel, config.ai.model);
+});
+
 test("AI runtime limits stay within safe bounds", () => {
   assert.ok(config.ai.cooldownMs >= 250 && config.ai.cooldownMs <= 60000);
   assert.ok(config.ai.historyLimit >= 1 && config.ai.historyLimit <= 25);
   assert.ok(config.ai.maxToolRounds >= 1 && config.ai.maxToolRounds <= 12);
   assert.ok(config.ai.providerTimeoutMs >= 1000 && config.ai.providerTimeoutMs <= 120000);
+});
+
+
+test("Minecraft pricing calculator returns deterministic base and processor totals", () => {
+  const plan = getMinecraftPricing({ plan_id: "hxc-s04", processor: "Ryzen 7" }).plans[0];
+  assert.equal(plan.id, "HXC-S04");
+  assert.equal(plan.baseMonthly, 1.19);
+  assert.equal(plan.processorFeeMonthly, 2.4);
+  assert.equal(plan.totalMonthly, 3.59);
+});
+
+test("Minecraft pricing calculator lists processor totals without assuming a processor", () => {
+  const result = getMinecraftPricing({ plan_id: "HXC-S04" });
+  assert.equal(result.liveVerified, false);
+  assert.deepEqual(result.plans[0].processorOptions.map((item) => item.totalMonthly), [2.49, 3.59, 4.09, 4.59]);
+  assert.throws(() => getMinecraftPricing({ plan_id: "HXC-NOT-REAL" }), /Unknown Minecraft plan ID/);
+  assert.throws(() => getMinecraftPricing({ plan_id: "HXC-S04", processor: "Unknown CPU" }), /Unknown processor tier/);
+});
+
+test("AI tool registry exposes deterministic Minecraft price lookup", () => {
+  assert.ok(toolDeclarations.some((tool) => tool.name === "get_minecraft_pricing"));
+});
+
+
+test("paid VPS plan lookup never substitutes the invite-reward VPS plan", async () => {
+  let fetched = false;
+  await assert.rejects(
+    resolvePaidVpsPlans({
+      enabled: false,
+      fetchPlans: async () => { fetched = true; return { plans: config.invitePlans }; },
+    }),
+    /integration is not configured/i,
+  );
+  assert.equal(fetched, false);
+});
+
+test("paid VPS plan lookup rejects an empty catalog rather than guessing a price", async () => {
+  await assert.rejects(
+    resolvePaidVpsPlans({ enabled: true, fetchPlans: async () => ({ plans: [] }) }),
+    /returned no paid plans/i,
+  );
+});
+
+test("paid VPS plan lookup accepts verified plan data from the VPS integration", async () => {
+  const data = { plans: [{ id: "vps-8gb", name: "8GB VPS", ram_mb: 8192, price: 5 }] };
+  assert.deepEqual(
+    await resolvePaidVpsPlans({ enabled: true, fetchPlans: async () => data }),
+    data,
+  );
 });
