@@ -1,7 +1,7 @@
 import test from "node:test";
 import { classifyProviderFailure } from "../src/events/discord/aiSupport.js";
 import assert from "node:assert/strict";
-import { buildSupportPrompt, formatHistory, generateContentWithRetry, isQuotaExhaustedError, normalizeMessageContent, sanitizeToolOutput } from "../src/ai/support.js";
+import { buildSupportPrompt, formatHistory, generateContentWithRetry, generateContentWithModelFallback, isQuotaExhaustedError, normalizeMessageContent, sanitizeToolOutput } from "../src/ai/support.js";
 import { getSimpleGreetingReply } from "../src/events/discord/aiSupport.js";
 
 test("simple greetings use a safe canned welcome and do not classify support requests as greetings", () => {
@@ -218,6 +218,63 @@ test("generateContentWithRetry stops after the configured attempt limit", async 
     /temporarily unavailable/,
   );
   assert.equal(calls, 3);
+});
+
+test("model fallback switches to the configured fallback after transient primary-model failure", async () => {
+  const calls = [];
+  const result = await generateContentWithModelFallback(async (model) => {
+    calls.push(model);
+    if (model === "primary-model") {
+      const error = new Error("This model is currently experiencing high demand.");
+      error.status = 503;
+      throw error;
+    }
+    return { text: "fallback response" };
+  }, {
+    primaryModel: "primary-model",
+    fallbackModel: "fallback-model",
+    retryOptions: { attempts: 1, delayMs: 1, sleep: async () => {} },
+  });
+
+  assert.deepEqual(calls, ["primary-model", "fallback-model"]);
+  assert.equal(result.model, "fallback-model");
+  assert.equal(result.usedFallback, true);
+  assert.deepEqual(result.response, { text: "fallback response" });
+});
+
+test("model fallback does not retry quota exhaustion against another model", async () => {
+  const calls = [];
+  const quotaError = new Error('{"error":{"code":429,"message":"Quota exceeded for generate_content_free_tier_requests","status":"RESOURCE_EXHAUSTED"}}');
+  quotaError.status = 429;
+  await assert.rejects(
+    generateContentWithModelFallback(async (model) => {
+      calls.push(model);
+      throw quotaError;
+    }, {
+      primaryModel: "primary-model",
+      fallbackModel: "fallback-model",
+      retryOptions: { attempts: 1, delayMs: 1, sleep: async () => {} },
+    }),
+  );
+  assert.deepEqual(calls, ["primary-model"]);
+});
+
+test("model fallback does not switch models for permanent request errors", async () => {
+  const calls = [];
+  const invalidRequest = new Error("Invalid request payload.");
+  invalidRequest.status = 400;
+  await assert.rejects(
+    generateContentWithModelFallback(async (model) => {
+      calls.push(model);
+      throw invalidRequest;
+    }, {
+      primaryModel: "primary-model",
+      fallbackModel: "fallback-model",
+      retryOptions: { attempts: 1, delayMs: 1, sleep: async () => {} },
+    }),
+    /Invalid request payload/,
+  );
+  assert.deepEqual(calls, ["primary-model"]);
 });
 
 
