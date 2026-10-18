@@ -18,11 +18,28 @@ export class DatabaseManager extends EventEmitter {
     this.Panel = Panel;
     this.Ticket = Ticket;
     this.AIAudit = AIAudit;
+    this.isMemoryMode = false;
+    this.memoryGuilds = new Map();
+    this.memoryPanels = new Map();
+    this.memoryTickets = new Map();
+    this.memoryAudits = [];
+  }
+
+  isMongoActive() {
+    return !this.isMemoryMode && mongoose.connection.readyState === 1;
   }
 
   async connect(uri) {
+    mongoose.set("bufferCommands", false);
+    if (!uri) {
+      this.isMemoryMode = true;
+      logger.warn("Database", "No MONGODB_URI provided — running in resilient in-memory mode.");
+      this.emit("databaseOffline");
+      return;
+    }
     try {
-      await mongoose.connect(uri);
+      await mongoose.connect(uri, { serverSelectionTimeoutMS: 4000 });
+      this.isMemoryMode = false;
       logger.success("Database", "Connected to MongoDB");
       
       // Clean up old indexes that might cause duplicate key errors
@@ -38,16 +55,18 @@ export class DatabaseManager extends EventEmitter {
       
       this.client.emit("databaseConnected");
     } catch (error) {
-      logger.error("Database", "Connection failed", error);
+      this.isMemoryMode = true;
+      logger.warn("Database", `MongoDB connection failed (${error.message}) — falling back to resilient in-memory mode.`);
       this.client.emit("databaseError", error);
-      throw error;
     }
   }
 
   async disconnect() {
     try {
-      await mongoose.disconnect();
-      logger.info("Database", "Disconnected from MongoDB");
+      if (this.isMongoActive()) {
+        await mongoose.disconnect();
+      }
+      logger.info("Database", "Disconnected from database");
       this.client.emit("databaseDisconnected");
     } catch (error) {
       logger.error("Database", "Disconnection failed", error);

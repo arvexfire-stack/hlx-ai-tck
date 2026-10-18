@@ -1,0 +1,7 @@
+{
+  "name": "HelzerX Studio AI Support",
+  "description": "HelzerX Studio AI-powered Discord ticket support system",
+  "capabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

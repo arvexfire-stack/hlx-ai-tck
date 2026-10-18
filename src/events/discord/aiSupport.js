@@ -68,6 +68,24 @@ export default {
     cooldowns.set(message.channel.id, now);
     await message.channel.sendTyping();
 
+    // Multimodal Vision Support: Extract screenshot / image attachment if provided by customer
+    let imageBuffer = null;
+    let imageMimeType = null;
+    const imgAttachment = message.attachments.find(
+      (a) => a.contentType?.startsWith("image/") || /\.(png|jpe?g|webp)$/i.test(a.name)
+    );
+    if (imgAttachment) {
+      try {
+        const resp = await fetch(imgAttachment.url);
+        if (resp.ok) {
+          imageBuffer = Buffer.from(await resp.arrayBuffer());
+          imageMimeType = imgAttachment.contentType || "image/png";
+        }
+      } catch (imgErr) {
+        logger.warn("AI Support", "Failed to download image attachment: " + imgErr.message);
+      }
+    }
+
     try {
       const result = await generateSupportReply({
         guildName: message.guild.name,
@@ -75,7 +93,9 @@ export default {
         categoryDescription: category.description || category.settings?.welcomeMessage || "",
         customerName: message.member?.displayName || message.author.username,
         history: formatHistory(previousMessages),
-        latestMessage: message.content,
+        latestMessage: message.content || (imgAttachment ? "Please inspect the attached screenshot or image." : ""),
+        imageBuffer,
+        imageMimeType,
         model: category.settings?.aiModel || guildConfig?.aiSupport?.model || config.ai.model,
         client,
         message,

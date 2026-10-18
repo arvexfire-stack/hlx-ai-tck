@@ -70,10 +70,17 @@ export class Bot extends Client {
       await this.eventHandler.loadAllEvents();
       await this.commandHandler.loadCommands();
 
-      await this.login(config.token);
-
-      this.logger.success("Bot", `❄️ Bot has successfully initialized. 🌸`);
-      this.logger.info("Bot", "❄️ Coded by Bre4d777");
+      if (config.token && typeof config.token === "string" && config.token.trim().length > 10) {
+        try {
+          await this.login(config.token.trim());
+          this.logger.success("Bot", `❄️ Bot has successfully initialized and logged in. 🌸`);
+          this.logger.info("Bot", "❄️ HelzerX Studio AI Support active");
+        } catch (loginErr) {
+          this.logger.warn("Bot", `⚠️ Discord login failed (${loginErr.message}). Web services and AI dashboard remain active.`);
+        }
+      } else {
+        this.logger.warn("Bot", "⚠️ DISCORD_TOKEN is not configured in .env. Bot running in Web Dashboard & AI Support Service mode.");
+      }
     } catch (error) {
       this.logger.error("Bot", "❄️ Failed to initialize bot cluster:", error);
       throw error;

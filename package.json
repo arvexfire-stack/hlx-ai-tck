@@ -5,7 +5,9 @@
   "type": "module",
   "main": "src/index.js",
   "scripts": {
+    "dev": "node src/index.js",
     "start": "node src/index.js",
+    "build": "node --check src/index.js",
     "format": "prettier --write \"src/**/*.js\"",
     "test": "node --test",
     "test:ai": "node --test tests/ai-support.test.js tests/ai-agent.test.js",

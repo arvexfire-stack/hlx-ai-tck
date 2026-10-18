@@ -6,6 +6,7 @@
 
 import { Bot } from "#classes/client";
 import { logger } from "#utils/logger";
+import { createWebServer } from "./web/server.js";
 
 process.removeAllListeners("warning");
 process.on("warning", (warning) => {
@@ -19,14 +20,18 @@ process.on("warning", (warning) => {
 });
 
 const client = new Bot();
+let webServer = null;
 
 const main = async () => {
   try {
+    // Start Express Web Server on port 3000
+    webServer = createWebServer(client);
+
+    // Initialize Discord Bot client
     await client.init();
-    logger.success("Main", "Discord bot initialized successfully");
+    logger.success("Main", "HelzerX Technologies AI Support Bot & Web Console operational");
   } catch (error) {
-    logger.error("Main", "Failed to initialize Discord bot", error);
-    process.exit(1);
+    logger.error("Main", "Bot initialization notice:", error.message || error);
   }
 };
 

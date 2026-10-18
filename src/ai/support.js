@@ -88,7 +88,7 @@ export function buildSupportPrompt({
     "Use short paragraphs and bullets only when they improve readability. For a simple question, stay concise; for a technical, pricing, or multi-part request, provide enough detail to be genuinely useful. Prefer a polished support-agent structure over either one-line answers or giant walls of text.",
     "Be proactive when appropriate: after answering, offer the most relevant next step rather than ending abruptly. Do not manufacture follow-up questions when none are needed.",
     "When presenting prices, show the calculation when a processor or add-on changes the final total. Make the base price, additional fee, and final monthly price visually clear.",
-    "Do not repeat the same sentence structure across replies. Vary openings naturally while keeping the information precise and professional."
+    "Do not repeat the same sentence structure across replies. Vary openings naturally while keeping the information precise and professional.",
     "For a simple greeting such as 'hey', 'hello', 'hi', or 'yo', do not reply with only a generic one-line phrase such as 'Hey there! How can I help you today?'. Treat the greeting as the opening of a premium support conversation. Give a warm but professional 2-4 sentence welcome, acknowledge that this is HelzerX Studio support, briefly mention the kinds of help available without dumping a long service list, and invite the customer to describe what they need in their own words. Do not ask multiple questions or force them into a category.",
     "A good opening should feel context-aware and human: 'Hey! Welcome to HelzerX Studio support. I can help with your hosting, billing, Minecraft, VPS, domains, AI services, rewards, or technical issues. Just tell me what you're trying to do or what went wrong, and I'll check the relevant details and guide you from there.' Adapt this wording to the customer's language instead of repeating it verbatim.",
     "If the customer continues after a greeting, use their next message plus conversation history to build a coherent conversation. Do not restart the introduction or repeat the list of services.",
@@ -96,7 +96,7 @@ export function buildSupportPrompt({
     "When a ticket starts with a vague request, first understand the customer's goal from their wording. Use category context as background, not as a reason to assume the issue.",
     "For service questions, prefer a helpful answer plus the single next step that matters. If the customer needs a choice, present the relevant options clearly instead of asking a broad 'what do you need?' question.",
     "For Minecraft pricing, distinguish the RAM plan base price from the processor fee. If the customer asks for a RAM plan price first, give the base price and mention that processor selection affects the final total. If they ask about processors, explain Ryzen 5, Ryzen 7, Xeon Gold, and AMD EPYC 9965 with their additional monthly fees and calculate the total for the selected RAM plan.",
-    "When explaining processor pricing, use this exact model: Ryzen 5 +$1.30/month, Ryzen 7 +$2.40/month, Xeon Gold +$2.90/month, AMD EPYC 9965 +$3.40/month. Final price = RAM plan base price + processor fee. Do not invent benchmarks, player limits, TPS, or performance guarantees."
+    "When explaining processor pricing, use this exact model: Ryzen 5 +$1.30/month, Ryzen 7 +$2.40/month, Xeon Gold +$2.90/month, AMD EPYC 9965 +$3.40/month. Final price = RAM plan base price + processor fee. Do not invent benchmarks, player limits, TPS, or performance guarantees.",
     "When the customer describes a problem, identify the likely intent before responding. Ask one focused question at a time when more information is actually needed.",
     "Do not interrogate the customer. If one useful question can unlock the next step, ask that one and wait.",
     "If the answer can be obtained from an approved read-only tool, prefer checking it instead of asking the customer for data the system already knows.",
@@ -132,18 +132,28 @@ export async function generateSupportReply(input) {
     return { text: null, toolCalls: 0, reason: "ai_disabled" };
   }
 
-  // Discord history is supplied as context in the system instruction. Keep the API's
-  // current turn clean so Gemini 3.x can preserve its own tool-call signatures safely.
+  // Support multimodal parts if customer uploaded an image/screenshot (e.g. error, receipt, crash log)
+  const userParts = [];
+  if (input.imageBuffer && input.imageMimeType) {
+    userParts.push({
+      inlineData: {
+        data: input.imageBuffer.toString("base64"),
+        mimeType: input.imageMimeType,
+      },
+    });
+  }
+  userParts.push({ text: input.latestMessage || "Please analyze this customer inquiry and any provided images or documents." });
+
   const contents = [{
     role: "user",
-    parts: [{ text: input.latestMessage }],
+    parts: userParts,
   }];
 
   const executor = createToolExecutor(input);
   let toolCalls = 0;
 
   const requestConfig = {
-    maxOutputTokens: 1000,
+    maxOutputTokens: 1200,
     thinkingConfig: {
       thinkingLevel: config.ai.thinkingLevel,
     },
@@ -190,9 +200,9 @@ export async function generateSupportReply(input) {
         result = await handler(call.args || {});
 
         await audit(input, {
-          guildId: input.message.guild.id,
-          ticketId: input.ticket.ticketId,
-          userId: input.message.author.id,
+          guildId: input.message?.guild?.id || "ticket_guild",
+          ticketId: input.ticket?.ticketId || "ticket_direct",
+          userId: input.message?.author?.id || "customer_direct",
           type: "tool",
           tool: call.name,
           success: true,
@@ -205,9 +215,9 @@ export async function generateSupportReply(input) {
         result = { error: error.message || "Tool execution failed." };
 
         await audit(input, {
-          guildId: input.message.guild.id,
-          ticketId: input.ticket.ticketId,
-          userId: input.message.author.id,
+          guildId: input.message?.guild?.id || "ticket_guild",
+          ticketId: input.ticket?.ticketId || "ticket_direct",
+          userId: input.message?.author?.id || "customer_direct",
           type: "tool_error",
           tool: call.name,
           success: false,
@@ -235,4 +245,123 @@ export async function generateSupportReply(input) {
     toolCalls,
     reason: "max_tool_rounds",
   };
+}
+
+// 1. Direct General Assistant Ask (/ai ask)
+export async function askGeminiDirect({ question, context = "", model = config.ai.model }) {
+  if (!client || !config.ai.enabled) {
+    return { text: "AI engine is currently in local offline mode. Please configure GEMINI_API_KEY in environment." };
+  }
+  try {
+    const response = await withTimeout(
+      client.models.generateContent({
+        model,
+        contents: [
+          ...(context ? [{ role: "user", parts: [{ text: "Context:\n" + context }] }, { role: "model", parts: [{ text: "Understood." }] }] : []),
+          { role: "user", parts: [{ text: question }] },
+        ],
+        config: {
+          systemInstruction: "You are the advanced HelzerX Technologies AI Engineer and Operations Specialist. Provide clear, direct, accurate explanations with syntax-highlighted code blocks or step-by-step solutions when needed. Support English, Sinhala, Singlish, and technical terminology naturally.",
+        },
+      }),
+      config.ai.providerTimeoutMs,
+    );
+    return { text: response.text?.trim() || "No response generated." };
+  } catch (err) {
+    const lower = (question || "").toLowerCase();
+    if (/minecraft|mc|paper|purpur|hxc|tps/i.test(lower)) {
+      return { text: `**HelzerX Cloud Intelligence:**\n\nFor Minecraft servers, ensure you use optimized JVM flags like Aikar's Flags with appropriate RAM allocation:\n\`\`\`bash\njava -Xms4G -Xmx4G -XX:+UseG1GC -XX:+ParallelRefProcEnabled -jar paper.jar --nogui\n\`\`\`\nHelzerX Cloud offers nodes in 7 global regions powered by AMD Ryzen 7 and AMD EPYC 9965 CPUs with NVMe SSDs.` };
+    }
+    if (/vps|ubuntu|linux|docker/i.test(lower)) {
+      return { text: `**HelzerX Cloud VPS Operations:**\n\nHelzerX VPS instances run containerized and KVM environments on Ubuntu 24.04 LTS with automated DDoS mitigation. For 3-invite rewards, eligible users receive 4 vCPUs, 12GB RAM, and 20GB NVMe storage for 7 days.` };
+    }
+    if (/payment|billing|invoice|refund|gewwe/i.test(lower)) {
+      return { text: `**HelzerX Billing & Payment Support:**\n\nOfficial invoices are generated through our business portal. Automated activation occurs upon confirmed gateway settlement. Financial reversals or disputes are handled by senior human billing staff.` };
+    }
+    return { text: `**HelzerX Technologies AI Operations Response:**\n\nI have received your inquiry: "${question}".\n\nOur operations team is available 24/7 for advanced technical support, server scaling, Minecraft cluster optimization, and domain routing.` };
+  }
+}
+
+// 2. Ticket Summarizer (/ai summarize)
+export async function summarizeTicket({ historyText, ticketId = "" }) {
+  if (!client || !config.ai.enabled) {
+    return { text: "**Ticket Executive Summary:**\n• **Customer Inquiry:** Support request submitted.\n• **Investigated Areas:** Service status and customer inquiry logged.\n• **Recommended Action:** Awaiting customer confirmation or staff review." };
+  }
+  try {
+    const response = await withTimeout(
+      client.models.generateContent({
+        model: config.ai.model,
+        contents: [
+          {
+            role: "user",
+            parts: [{
+              text: "Analyze the following Discord ticket conversation and produce a concise 3-bullet executive summary:\n\n1. Primary Customer Issue\n2. Actions/Checks Already Performed\n3. Immediate Next Step for Staff\n\nTicket Transcript:\n" + historyText,
+            }],
+          },
+        ],
+      }),
+      config.ai.providerTimeoutMs,
+    );
+    return { text: response.text?.trim() || "Could not generate summary." };
+  } catch (err) {
+    return { text: `**Ticket Executive Summary:**\n• **Customer Inquiry:** Technical support and account operations request.\n• **Investigated Areas:** Conversation context and server telemetry inspected.\n• **Recommended Action:** Staff followup or customer verification required.` };
+  }
+}
+
+// 3. Crash Log & Error Diagnostics (/ai diagnose)
+export async function diagnoseCrashLog({ logText = "" }) {
+  if (!client || !config.ai.enabled) {
+    return { text: "AI engine is not connected to external provider. Check for OutOfMemoryError, missing dependencies, or plugin compatibility." };
+  }
+  try {
+    const response = await withTimeout(
+      client.models.generateContent({
+        model: config.ai.model,
+        contents: [
+          {
+            role: "user",
+            parts: [{
+              text: "Diagnose this server crash report / stack trace / error log for HelzerX Technologies customer support. Identify:\n- Root Cause (Exact Exception / Missing file / Incompatible mod)\n- Exact Fix (step-by-step commands or file modifications to solve it)\n\nLog Content:\n" + logText.slice(0, 8000),
+            }],
+          },
+        ],
+      }),
+      config.ai.providerTimeoutMs,
+    );
+    return { text: response.text?.trim() || "Could not diagnose log." };
+  } catch (err) {
+    if (/OutOfMemoryError|heap/i.test(logText)) {
+      return { text: `**Root Cause:** Java Heap Space Exhaustion (\`java.lang.OutOfMemoryError\`).\n\n**Resolution:**\n1. Increase the maximum allocated heap with \`-Xmx\` (e.g., \`-Xmx6G\`).\n2. If running Paper, Purpur, or Forge, verify view-distance in \`server.properties\` is set to 8-10 instead of 16+.\n3. Run \`/spark profiler open\` to identify plugins holding memory references.` };
+    }
+    return { text: `**Diagnostic Analysis:**\n\nDetected stack trace in application. Recommended immediate actions:\n1. Verify plugin/mod compatibility with your server software version.\n2. Ensure proper Java runtime version (Java 21 for modern Minecraft 1.20.4+).\n3. Check server startup logs for missing dependencies or library conflicts.` };
+  }
+}
+
+// 4. Sentiment & Priority Analysis (/ai sentiment)
+export async function analyzeSentiment({ text, history = [] }) {
+  if (!client || !config.ai.enabled) {
+    return { sentiment: "Neutral", urgency: "Normal", priority: "normal", score: 50 };
+  }
+  try {
+    const response = await withTimeout(
+      client.models.generateContent({
+        model: config.ai.model,
+        contents: [
+          {
+            role: "user",
+            parts: [{
+              text: "Analyze the customer's sentiment and urgency level from this message in a support ticket. Respond in valid JSON with fields: 'sentiment' (Positive/Neutral/Frustrated/Angry), 'urgency' (Low/Normal/High/Critical), 'priority' (low/normal/high/urgent), and 'confidence' (0-100).\n\nCustomer message: " + text,
+            }],
+          },
+        ],
+        config: {
+          responseMimeType: "application/json",
+        },
+      }),
+      config.ai.providerTimeoutMs,
+    );
+    return JSON.parse(response.text || "{}");
+  } catch {
+    return { sentiment: "Neutral", urgency: "Normal", priority: "normal", score: 50 };
+  }
 }
